@@ -1,0 +1,70 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: aether-flow
+  namespace: aether-flow
+  labels:
+    app: aether-flow
+    app.kubernetes.io/name: aether-flow
+    app.kubernetes.io/part-of: aether
+spec:
+  type: ClusterIP
+  selector:
+    app: aether-flow
+  ports:
+    - name: http
+      port: 8085
+      targetPort: 8085
+      protocol: TCP
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: aether-flow
+  namespace: aether-flow
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: aether-flow
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: aether-flow
+  namespace: aether-flow
+  labels:
+    app.kubernetes.io/name: aether-flow
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aether-flow-config
+  namespace: aether-flow
+data:
+  escalation-enabled: "true"
+  escalation-cron: "0 */5 * * * *"
+  deferral-sla-minutes: "60"
+---
+# Template only — never commit actual values
+# kubectl create secret generic aether-flow-secrets \
+#   --from-literal=postgres-url=jdbc:postgresql://... \
+#   --from-literal=postgres-user=aether \
+#   --from-literal=postgres-password=<secret>
+apiVersion: v1
+kind: Secret
+metadata:
+  name: aether-flow-secrets
+  namespace: aether-flow
+type: Opaque
+data: {}  # Populated externally — never in source control

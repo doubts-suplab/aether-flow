@@ -1,0 +1,141 @@
+package com.suplab.aether.flow.engine.orchestration;
+
+import com.suplab.aether.flow.domain.ApprovalOutcome;
+import com.suplab.aether.flow.domain.FlowScope;
+import com.suplab.aether.flow.domain.WorkflowDefinition;
+import com.suplab.aether.flow.domain.WorkflowInstance;
+import com.suplab.aether.flow.domain.WorkflowStatus;
+import com.suplab.aether.flow.domain.WorkflowStep;
+import com.suplab.aether.flow.engine.support.InMemoryStores;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
+import java.util.List;
+import java.util.UUID;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+class DefaultWorkflowOrchestrationServiceTest {
+
+    private static final FlowScope SCOPE = FlowScope.of("acme", "invoice-approval");
+
+    private InMemoryStores.Definitions definitions;
+    private InMemoryStores.Instances instances;
+    private InMemoryStores.Tasks tasks;
+    private DefaultWorkflowOrchestrationService engine;
+
+    @BeforeEach
+    void setUp() {
+        definitions = new InMemoryStores.Definitions();
+        instances = new InMemoryStores.Instances();
+        tasks = new InMemoryStores.Tasks();
+        engine = new DefaultWorkflowOrchestrationService(definitions, instances, tasks);
+    }
+
+    private WorkflowDefinition approvalWorkflow() {
+        return WorkflowDefinition.create(SCOPE, "Invoice Approval", List.of(
+                WorkflowStep.automated("intake", "Intake", "review"),
+                WorkflowStep.humanApproval("review", "Manager review", 120, "finance-manager", "finish"),
+                WorkflowStep.end("finish", "Done")));
+    }
+
+    @Test
+    void start_advancesThroughAutomatedStepsAndParksAtApproval() {
+        definitions.save(approvalWorkflow());
+
+        var instance = engine.start(SCOPE, "INV-1001");
+
+        assertThat(instance.status()).isEqualTo(WorkflowStatus.WAITING_APPROVAL);
+        assertThat(instance.currentStepKey()).isEqualTo("review");
+        assertThat(tasks.all()).hasSize(1);
+        var task = tasks.all().get(0);
+        assertThat(task.outcome()).isEqualTo(ApprovalOutcome.PENDING);
+        assertThat(task.assignedRole()).isEqualTo("finance-manager");
+        assertThat(task.instanceId()).isEqualTo(instance.id());
+    }
+
+    @Test
+    void approve_advancesPastGateToCompletion() {
+        definitions.save(approvalWorkflow());
+        var parked = engine.start(SCOPE, "INV-1001");
+        var task = tasks.all().get(0);
+
+        var completed = engine.approve("acme", task.id(), "alice", "ok");
+
+        assertThat(completed.status()).isEqualTo(WorkflowStatus.COMPLETED);
+        assertThat(completed.completedAt()).isNotNull();
+        assertThat(completed.id()).isEqualTo(parked.id());
+        assertThat(tasks.findById("acme", task.id()).orElseThrow().outcome())
+                .isEqualTo(ApprovalOutcome.APPROVED);
+    }
+
+    @Test
+    void reject_stopsInstanceInRejected() {
+        definitions.save(approvalWorkflow());
+        engine.start(SCOPE, "INV-1001");
+        var task = tasks.all().get(0);
+
+        var rejected = engine.reject("acme", task.id(), "bob", "missing receipt");
+
+        assertThat(rejected.status()).isEqualTo(WorkflowStatus.REJECTED);
+        assertThat(tasks.findById("acme", task.id()).orElseThrow().outcome())
+                .isEqualTo(ApprovalOutcome.REJECTED);
+    }
+
+    @Test
+    void start_completesImmediatelyWhenNoHumanStep() {
+        definitions.save(WorkflowDefinition.create(SCOPE, "Auto", List.of(
+                WorkflowStep.automated("a", "A", "b"),
+                WorkflowStep.automated("b", "B", "end"),
+                WorkflowStep.end("end", "End"))));
+
+        var instance = engine.start(SCOPE, null);
+
+        assertThat(instance.status()).isEqualTo(WorkflowStatus.COMPLETED);
+        assertThat(tasks.all()).isEmpty();
+    }
+
+    @Test
+    void multipleApprovalGatesParkAtEachInTurn() {
+        definitions.save(WorkflowDefinition.create(SCOPE, "Two Gates", List.of(
+                WorkflowStep.humanApproval("first", "First", 60, "reviewer", "second"),
+                WorkflowStep.humanApproval("second", "Second", 60, "director", "end"),
+                WorkflowStep.end("end", "End"))));
+
+        var parked1 = engine.start(SCOPE, null);
+        assertThat(parked1.currentStepKey()).isEqualTo("first");
+
+        var firstTask = tasks.findOpenByInstance("acme", parked1.id()).orElseThrow();
+        var parked2 = engine.approve("acme", firstTask.id(), "alice", null);
+        assertThat(parked2.status()).isEqualTo(WorkflowStatus.WAITING_APPROVAL);
+        assertThat(parked2.currentStepKey()).isEqualTo("second");
+
+        var secondTask = tasks.findOpenByInstance("acme", parked2.id()).orElseThrow();
+        assertThat(secondTask.assignedRole()).isEqualTo("director");
+        var done = engine.approve("acme", secondTask.id(), "carol", null);
+        assertThat(done.status()).isEqualTo(WorkflowStatus.COMPLETED);
+    }
+
+    @Test
+    void start_failsWhenNoActiveDefinition() {
+        assertThatThrownBy(() -> engine.start(SCOPE, null))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("no active definition");
+    }
+
+    @Test
+    void approve_failsForUnknownTask() {
+        assertThatThrownBy(() -> engine.approve("acme", UUID.randomUUID(), "alice", null))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("approval task not found");
+    }
+
+    @Test
+    void persistsEveryTransition() {
+        definitions.save(approvalWorkflow());
+        engine.start(SCOPE, "INV-1001");
+        // one instance persisted (across intake->review transitions, same id)
+        assertThat(instances.size()).isEqualTo(1);
+        var stored = instances.findByStatus(SCOPE, WorkflowStatus.WAITING_APPROVAL, 10);
+        assertThat(stored).hasSize(1);
+    }
+}
