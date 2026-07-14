@@ -55,4 +55,19 @@ public interface WorkflowEnginePort {
      * @throws IllegalStateException    if the task is already decided
      */
     WorkflowInstance reject(String tenantId, UUID taskId, String decidedBy, String comment);
+
+    /**
+     * Cancels a non-terminal instance (an operator action). If the instance is parked at an
+     * approval gate, its open task is withdrawn — the review is moot — so it leaves the queue
+     * without a human decision. The instance stops in {@code CANCELLED}.
+     *
+     * @param tenantId    the owning tenant
+     * @param instanceId  the instance to cancel
+     * @param cancelledBy who requested the cancellation
+     * @param reason      optional cancellation note
+     * @return the persisted instance in {@code CANCELLED}
+     * @throws IllegalArgumentException if the instance cannot be found
+     * @throws IllegalStateException    if the instance is already in a terminal state
+     */
+    WorkflowInstance cancel(String tenantId, UUID instanceId, String cancelledBy, String reason);
 }

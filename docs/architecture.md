@@ -58,9 +58,10 @@ WorkflowInstance
 
 ApprovalTask
   id, tenantId, instanceId, workflowKey, stepKey, assignedRole,
-  outcome (PENDING|APPROVED|REJECTED|ESCALATED), slaDueAt, createdAt, decidedAt, decidedBy, comment
+  outcome (PENDING|APPROVED|REJECTED|ESCALATED|WITHDRAWN), slaDueAt, createdAt, decidedAt, decidedBy, comment
   ├── isBreached(asOf)               → open and past SLA deadline
-  └── approve/reject/escalate        → decision or visibility transitions
+  ├── approve/reject/escalate        → decision or visibility transitions
+  └── withdraw()                     → closed (no human decision) when its instance is cancelled
 
 DeferredDecision = (correlationId, tenantId, agentId, summary, confidence, requestedRole, receivedAt)
                    — Grid's bounded DEFER projection; CONFIDENCE_GATE = 0.8
@@ -86,6 +87,7 @@ DeferredDecision = (correlationId, tenantId, agentId, summary, confidence, reque
 | `V001` | `workflow_definitions` | Versioned templates; JSONB `steps`; unique-active partial index on `(tenant_id, workflow_key)`; unique `(tenant_id, workflow_key, version)` |
 | `V002` | `workflow_instances` | Durable execution state; index on `(tenant_id, workflow_key, status, updated_at)` and on `business_key` |
 | `V003` | `approval_tasks` | Human review queue; `instance_id` FK `ON DELETE CASCADE`; partial index for the open queue and for the SLA sweep (`outcome='PENDING'` by `sla_due_at`) |
+| `V004` | `approval_tasks.outcome` CHECK | Extends the outcome constraint to allow `WITHDRAWN` (a task closed because its instance was cancelled) |
 
 Flow owns **no** vector store or embedding — the step graph is plain JSONB, everything else is relational. This keeps Flow single-store on PostgreSQL like the rest of the ecosystem, with no LLM runtime dependency.
 
@@ -102,12 +104,17 @@ Flow owns **no** vector store or embedding — the step graph is plain JSONB, ev
 2. `POST …/approvals/{taskId}/approve` → `engine.approve` records the decision, moves the parked instance to the gate's successor, and drives onward to the next park or completion.
 3. `POST …/approvals/{taskId}/reject` → `engine.reject` stops the instance in `REJECTED`.
 
-### 5.3 SLA escalation (set-based)
+### 5.3 Cancellation (operator withdrawal)
+1. `POST …/instances/{id}/cancel` → `WorkflowEnginePort.cancel` loads the instance; a terminal instance is rejected (409).
+2. If the instance is parked at an approval gate, its open task is `withdraw()`-n (`WITHDRAWN` — closed without a human decision, leaves the queue).
+3. The instance transitions to `CANCELLED` and is persisted. Escalation and the review queue never surface a withdrawn task again.
+
+### 5.4 SLA escalation (set-based)
 1. Scheduler (`@Scheduled`, default every 5 min) → `SlaEscalationPort.sweep`.
 2. Single `UPDATE`: `PENDING` tasks with `sla_due_at < NOW()` become `ESCALATED` (still open — a human must decide).
 3. Micrometer: `aether.flow.escalation.escalated` counter, `aether.flow.approvals.open` gauge.
 
-### 5.4 Grid DEFER intake
+### 5.5 Grid DEFER intake
 1. Grid's confidence gate (`confidence < 0.8`) defers a decision and POSTs a bounded `DeferredDecision` to `/api/v1/deferrals`.
 2. `ApprovalGatewayPort.accept` ensures a canonical `grid-deferral` definition exists for the tenant, starts an instance, parks it at the review gate, and raises an `ApprovalTask` routed to `requestedRole`.
 3. The reviewer's approve/reject on that task is the answer Grid awaits, correlated by `correlationId`.

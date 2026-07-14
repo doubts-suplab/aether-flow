@@ -85,6 +85,22 @@ public class DefaultWorkflowOrchestrationService implements WorkflowEnginePort {
         return rejected;
     }
 
+    @Override
+    public WorkflowInstance cancel(String tenantId, UUID instanceId, String cancelledBy, String reason) {
+        var instance = requireInstance(tenantId, instanceId);
+        if (instance.status().isTerminal())
+            throw new IllegalStateException(
+                    "instance " + instanceId + " is already in terminal state " + instance.status());
+        approvalTaskStore.findOpenByInstance(tenantId, instanceId).ifPresent(task -> {
+            approvalTaskStore.save(task.withdraw());
+            log.info("Withdrew open taskId={} on cancellation of instanceId={}", task.id(), instanceId);
+        });
+        var cancelled = instance.cancel();
+        instanceStore.save(cancelled);
+        log.info("Cancelled instanceId={} tenantId={} by={} reason={}", instanceId, tenantId, cancelledBy, reason);
+        return cancelled;
+    }
+
     /**
      * Advances an instance from its current step until it parks at a human-approval gate or reaches
      * a terminal state, persisting every transition.

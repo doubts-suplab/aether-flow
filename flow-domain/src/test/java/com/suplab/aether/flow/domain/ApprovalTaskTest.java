@@ -71,11 +71,28 @@ class ApprovalTaskTest {
     }
 
     @Test
+    void withdraw_closesTaskWithoutADecision() {
+        var task = ApprovalTask.raise(parkedInstance(60), reviewStep(60), "reviewer").withdraw();
+        assertThat(task.outcome()).isEqualTo(ApprovalOutcome.WITHDRAWN);
+        assertThat(task.outcome().isOpen()).isFalse();
+        assertThat(task.outcome().isDecided()).isFalse();
+        assertThat(task.outcome().isResolved()).isTrue();
+        assertThat(task.decidedBy()).isNull();
+    }
+
+    @Test
+    void withdraw_worksFromEscalated() {
+        var task = ApprovalTask.raise(parkedInstance(60), reviewStep(60), "reviewer").escalate().withdraw();
+        assertThat(task.outcome()).isEqualTo(ApprovalOutcome.WITHDRAWN);
+    }
+
+    @Test
     void decidingAnAlreadyDecidedTaskFails() {
         var task = ApprovalTask.raise(parkedInstance(60), reviewStep(60), "reviewer").approve("alice", null);
         assertThatThrownBy(() -> task.approve("bob", null)).isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(() -> task.reject("bob", null)).isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(task::escalate).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(task::withdraw).isInstanceOf(IllegalStateException.class);
     }
 
     @Test
@@ -99,6 +116,10 @@ class ApprovalTaskTest {
         assertThat(ApprovalOutcome.APPROVED.isDecided()).isTrue();
         assertThat(ApprovalOutcome.REJECTED.isDecided()).isTrue();
         assertThat(ApprovalOutcome.PENDING.isDecided()).isFalse();
+        assertThat(ApprovalOutcome.WITHDRAWN.isOpen()).isFalse();
+        assertThat(ApprovalOutcome.WITHDRAWN.isDecided()).isFalse();
+        assertThat(ApprovalOutcome.WITHDRAWN.isResolved()).isTrue();
+        assertThat(ApprovalOutcome.PENDING.isResolved()).isFalse();
     }
 
     @Test

@@ -34,8 +34,8 @@
 
 | Deliverable | Status |
 |---|---|
+| Instance cancellation endpoint + operator actions (withdraws open approval task) | ✅ |
 | Testcontainers coverage green in CI (definition, instance, approval stores, escalation) | ⏳ |
-| Instance cancellation endpoint + operator actions | ⏳ |
 | Parallel / branching gateways (beyond linear step graphs) | ⏳ |
 | Definition versioning + migration of in-flight instances | ⏳ |
 

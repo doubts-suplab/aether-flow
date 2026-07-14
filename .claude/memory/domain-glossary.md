@@ -11,7 +11,9 @@
 | **Workflow Status** | `RUNNING` \| `WAITING_APPROVAL` \| `COMPLETED` \| `REJECTED` \| `CANCELLED` \| `FAILED`. |
 | **Drive** | Advancing an instance from its current step until it parks at an approval gate or reaches a terminal state — every transition persisted. |
 | **Approval Task** | A human review gate raised at a `HUMAN_APPROVAL` step, with an SLA deadline and an assigned role. |
-| **Approval Outcome** | `PENDING` \| `APPROVED` \| `REJECTED` \| `ESCALATED`. `PENDING`/`ESCALATED` are open; `APPROVED`/`REJECTED` are decided. |
+| **Approval Outcome** | `PENDING` \| `APPROVED` \| `REJECTED` \| `ESCALATED` \| `WITHDRAWN`. `PENDING`/`ESCALATED` are open; `APPROVED`/`REJECTED` are decided; `WITHDRAWN` is closed without a decision. |
+| **Withdrawal** | Closing an open approval task because its instance was cancelled — terminal, not a human decision, leaves the queue. |
+| **Cancellation** | An operator stopping a non-terminal instance (`CANCELLED`); withdraws the instance's open approval task. |
 | **SLA Deadline** | `slaDueAt` on a task, `slaMinutes` after it is raised; an open task past it is *breached*. |
 | **SLA Escalation** | A scheduled set-based sweep flagging breached `PENDING` tasks as `ESCALATED`. Raises visibility, never auto-decides. |
 | **Deferred Decision** | Grid's bounded DEFER projection: correlation id, tenant, coarse agent id, summary, confidence, requested role. No Grid internals. |

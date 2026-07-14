@@ -5,15 +5,30 @@
 
 ---
 
-**Active Phase:** Phase 0 — Scaffold ✅ (complete)
+**Active Phase:** Phase 1 — Orchestration Engine Hardening 🔄 (in progress)
 
 | Phase | Name | Status | Sessions |
 |---|---|---|---|
 | 0 | Scaffold | ✅ Complete | 1 |
-| 1 | Orchestration Engine Hardening | ⏳ Planned | — |
+| 1 | Orchestration Engine Hardening | 🔄 In progress | 2 |
 | 2 | Human Approval & SLA Governance | ⏳ Planned | — |
 | 3 | Grid Integration Deepening | ⏳ Planned | — |
 | 4 | Kubernetes + Helm | ⏳ Planned | — |
+
+---
+
+## Phase 1 — Orchestration Engine Hardening 🔄
+
+**Commit:** `feat(flow): add workflow instance cancellation with approval-task withdrawal`
+
+### What was done (Session 2)
+- **Instance cancellation** — an operator can cancel any non-terminal instance:
+  - Domain: new terminal `ApprovalOutcome.WITHDRAWN` (closed without a human decision, not open, not decided) + `ApprovalTask.withdraw()`; `ApprovalOutcome.isResolved()`
+  - Engine: `WorkflowEnginePort.cancel(tenant, instanceId, cancelledBy, reason)` — withdraws the instance's open approval task (if parked) then stops it in `CANCELLED`; terminal/unknown instances rejected
+  - API: `POST …/workflows/{key}/instances/{id}/cancel` — 200 / 400 (no `cancelledBy`) / 404 (unknown) / 409 (terminal)
+  - Migration `V004` — extends the `approval_tasks.outcome` CHECK to allow `WITHDRAWN`
+- **Tests:** 62 unit tests green (5 new: withdraw transitions + outcome flags, cancel-parked/terminal/unknown); IT for `WITHDRAWN` upsert + queue exit
+- **Docs synced:** README, architecture (V004 + cancellation flow 5.3), roadmap, glossary, patterns, session-log, index.html, CLAUDE.md
 
 ---
 

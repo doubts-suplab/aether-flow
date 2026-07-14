@@ -9,13 +9,16 @@ package com.suplab.aether.flow.domain;
  *   <li>REJECTED — a human rejected; the workflow instance stops in {@code REJECTED}</li>
  *   <li>ESCALATED — the SLA elapsed with no decision; the task is flagged for a higher authority
  *       but remains actionable (escalation raises visibility, it does not auto-decide)</li>
+ *   <li>WITHDRAWN — the owning workflow instance was cancelled, so the review is moot; the task is
+ *       closed without a human decision and leaves the queue (not an approval, not a rejection)</li>
  * </ul>
  */
 public enum ApprovalOutcome {
     PENDING,
     APPROVED,
     REJECTED,
-    ESCALATED;
+    ESCALATED,
+    WITHDRAWN;
 
     /**
      * @return {@code true} if the task still awaits a human decision (PENDING or ESCALATED).
@@ -29,5 +32,13 @@ public enum ApprovalOutcome {
      */
     public boolean isDecided() {
         return this == APPROVED || this == REJECTED;
+    }
+
+    /**
+     * @return {@code true} if the task is closed for any reason — decided by a human, or withdrawn
+     *         because its instance was cancelled. A resolved task is never open.
+     */
+    public boolean isResolved() {
+        return !isOpen();
     }
 }
