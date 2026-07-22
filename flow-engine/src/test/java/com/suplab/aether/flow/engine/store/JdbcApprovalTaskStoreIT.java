@@ -83,6 +83,19 @@ class JdbcApprovalTaskStoreIT {
     }
 
     @Test
+    void save_upsertPersistsWithdrawalAndLeavesTheQueue() {
+        var tenant = "tenant-" + UUID.randomUUID();
+        var task = raiseTaskFor(tenant, "reviewer");
+        store.save(task);
+        store.save(task.withdraw());
+
+        var found = store.findById(tenant, task.id()).orElseThrow();
+        assertThat(found.outcome()).isEqualTo(ApprovalOutcome.WITHDRAWN);
+        assertThat(store.findOpenByInstance(tenant, task.instanceId())).isEmpty();
+        assertThat(store.findOpenByRole(tenant, "reviewer", 10)).isEmpty();
+    }
+
+    @Test
     void findOpenByRole_returnsOnlyOpenForRole() {
         var tenant = "tenant-" + UUID.randomUUID();
         var open = raiseTaskFor(tenant, "finance");

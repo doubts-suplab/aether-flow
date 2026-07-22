@@ -105,6 +105,18 @@ public record ApprovalTask(
                 ApprovalOutcome.ESCALATED, slaDueAt, createdAt, decidedAt, decidedBy, comment);
     }
 
+    /**
+     * Returns a withdrawn copy — the owning instance was cancelled, so this review no longer
+     * applies. The task closes without a human decision and leaves the queue. Not an approval, not
+     * a rejection: {@code decidedBy}/{@code decidedAt} stay unset (the cancellation is recorded on
+     * the instance).
+     */
+    public ApprovalTask withdraw() {
+        requireOpen();
+        return new ApprovalTask(id, tenantId, instanceId, workflowKey, stepKey, assignedRole,
+                ApprovalOutcome.WITHDRAWN, slaDueAt, createdAt, decidedAt, decidedBy, comment);
+    }
+
     private void requireOpen() {
         if (!outcome.isOpen())
             throw new IllegalStateException("approval task " + id + " already decided: " + outcome);

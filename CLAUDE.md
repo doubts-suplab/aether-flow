@@ -93,7 +93,7 @@ flow-infra  (no Java)
 | **WorkflowStep** | A node in the graph — `AUTOMATED`, `AGENT`, `HUMAN_APPROVAL`, or `END`. Approval steps carry an SLA budget and an assigned role. |
 | **WorkflowInstance** | A running (or finished) execution, pinned to a definition version. Its persisted state is what survives restarts. |
 | **FlowScope** | The `tenantId` + `workflowKey` ownership key — the multi-tenancy boundary. |
-| **ApprovalTask** | A human review gate raised at a `HUMAN_APPROVAL` step, with an SLA deadline. Approve / reject / escalate. |
+| **ApprovalTask** | A human review gate raised at a `HUMAN_APPROVAL` step, with an SLA deadline. Approve / reject / escalate; withdrawn if its instance is cancelled. |
 | **DeferredDecision** | The bounded projection Aether Grid sends when its confidence gate defers a decision to a human. |
 | **SLA Escalation** | A scheduled sweep that flags breached `PENDING` tasks as `ESCALATED` — raises visibility, never auto-decides. |
 

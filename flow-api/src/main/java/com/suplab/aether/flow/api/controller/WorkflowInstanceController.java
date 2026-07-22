@@ -85,6 +85,36 @@ public class WorkflowInstanceController {
         return ResponseEntity.ok(body);
     }
 
+    /** Request body for a cancellation. */
+    public record CancelRequest(String cancelledBy, String reason) {}
+
+    /**
+     * Cancels a non-terminal instance (an operator action). Withdraws its open approval task, if
+     * any, and stops the instance in {@code CANCELLED}.
+     *
+     * @return 200 OK with the instance view; 400 if {@code cancelledBy} is missing; 404 if the
+     *         instance is unknown; 409 if the instance is already terminal
+     */
+    @PostMapping("/{instanceId}/cancel")
+    public ResponseEntity<Object> cancel(@PathVariable String tenantId,
+                                         @PathVariable String workflowKey,
+                                         @PathVariable UUID instanceId,
+                                         @RequestBody(required = false) CancelRequest request) {
+        if (request == null || request.cancelledBy() == null || request.cancelledBy().isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "cancelledBy is required"));
+        }
+        try {
+            var instance = engine.cancel(tenantId, instanceId, request.cancelledBy(), request.reason());
+            log.info("Cancelled instanceId={} tenantId={} workflowKey={} by={}",
+                    instanceId, tenantId, workflowKey, request.cancelledBy());
+            return ResponseEntity.ok(toView(instance));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", e.getMessage()));
+        } catch (IllegalStateException e) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", e.getMessage()));
+        }
+    }
+
     /**
      * Returns a single instance by ID.
      *

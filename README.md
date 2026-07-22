@@ -37,6 +37,7 @@ cd ../.. && mvn spring-boot:run -pl flow-api
 | `POST` | `/api/v1/tenants/{tenantId}/workflows/{workflowKey}/instances` | Start an instance (drives to first stable state) |
 | `GET` | `/api/v1/tenants/{tenantId}/workflows/{workflowKey}/instances?status=` | List instances by status |
 | `GET` | `/api/v1/tenants/{tenantId}/workflows/{workflowKey}/instances/{id}` | Fetch an instance |
+| `POST` | `/api/v1/tenants/{tenantId}/workflows/{workflowKey}/instances/{id}/cancel` | Cancel an instance (withdraws its open approval task) |
 | `GET` | `/api/v1/tenants/{tenantId}/approvals?role=` | The human review queue (open tasks for a role) |
 | `POST` | `/api/v1/tenants/{tenantId}/approvals/{taskId}/approve` | Approve — advance the instance past the gate |
 | `POST` | `/api/v1/tenants/{tenantId}/approvals/{taskId}/reject` | Reject — stop the instance |
@@ -52,12 +53,12 @@ A **workflow** (`tenantId` + `workflowKey`) is a versioned process template — 
 | `WorkflowDefinition` | Versioned step graph, validated on construction (exactly one END, unique keys, resolvable transitions) |
 | `WorkflowStep` | `AUTOMATED` · `AGENT` · `HUMAN_APPROVAL` (SLA + role) · `END` |
 | `WorkflowInstance` | Lifecycle: `RUNNING → WAITING_APPROVAL → COMPLETED / REJECTED / CANCELLED / FAILED` |
-| `ApprovalTask` | A human review gate with an SLA deadline: `PENDING → APPROVED / REJECTED / ESCALATED` |
+| `ApprovalTask` | A human review gate with an SLA deadline: `PENDING → APPROVED / REJECTED / ESCALATED / WITHDRAWN` |
 | `DeferredDecision` | Grid's bounded DEFER projection (correlation id, tenant, agent, summary, confidence) |
 
 ### Orchestration
 
-Starting an instance drives it through automated and agent steps until it either **parks** at a `HUMAN_APPROVAL` gate (raising an `ApprovalTask`) or **completes** at the `END` step. A human decision resumes a parked instance: an approval advances it to the next step (and onward until the next park or completion); a rejection stops it. Every transition is persisted, so state survives a restart.
+Starting an instance drives it through automated and agent steps until it either **parks** at a `HUMAN_APPROVAL` gate (raising an `ApprovalTask`) or **completes** at the `END` step. A human decision resumes a parked instance: an approval advances it to the next step (and onward until the next park or completion); a rejection stops it. An operator can also **cancel** a non-terminal instance at any point — that withdraws its open approval task (a terminal, non-decision `WITHDRAWN` outcome) so it leaves the review queue. Every transition is persisted, so state survives a restart.
 
 ### Human Approval & SLA Escalation
 

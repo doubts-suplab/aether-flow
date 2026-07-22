@@ -17,6 +17,7 @@
 ## Orchestration
 - **Drive loop:** advance the current step — human step → park + raise task + return; END → complete + return; else → move to next step + save + continue. Bounded by `MAX_TRANSITIONS` to guard malformed graphs.
 - **Resume on decision:** approve records the decision, moves the parked instance to the gate's successor, and re-drives; reject stops the instance.
+- **Cancel withdraws the task:** cancelling a non-terminal instance withdraws its open approval task (`WITHDRAWN` — terminal, non-decision) before stopping the instance in `CANCELLED`, so no orphaned task lingers in the queue. Terminal instances are rejected (409).
 - **Version pinning:** an instance stores `definitionVersion`; the scaffold resolves the active definition to advance (single-version), leaving room for version-aware resume later.
 
 ## Spring wiring

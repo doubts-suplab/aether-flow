@@ -118,6 +118,38 @@ class DefaultWorkflowOrchestrationServiceTest {
     }
 
     @Test
+    void cancel_stopsParkedInstanceAndWithdrawsOpenTask() {
+        definitions.save(approvalWorkflow());
+        var parked = engine.start(SCOPE, "INV-1001");
+        var task = tasks.all().get(0);
+
+        var cancelled = engine.cancel("acme", parked.id(), "ops", "duplicate request");
+
+        assertThat(cancelled.status()).isEqualTo(WorkflowStatus.CANCELLED);
+        assertThat(cancelled.completedAt()).isNotNull();
+        assertThat(tasks.findById("acme", task.id()).orElseThrow().outcome())
+                .isEqualTo(ApprovalOutcome.WITHDRAWN);
+        assertThat(tasks.findOpenByInstance("acme", parked.id())).isEmpty();
+    }
+
+    @Test
+    void cancel_failsForTerminalInstance() {
+        definitions.save(WorkflowDefinition.create(SCOPE, "Auto", List.of(
+                WorkflowStep.automated("a", "A", "end"),
+                WorkflowStep.end("end", "End"))));
+        var done = engine.start(SCOPE, null);
+
+        assertThatThrownBy(() -> engine.cancel("acme", done.id(), "ops", null))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("terminal");
+    }
+
+    @Test
+    void cancel_failsForUnknownInstance() {
+        assertThatThrownBy(() -> engine.cancel("acme", UUID.randomUUID(), "ops", null))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("instance not found");
+    }
+
+    @Test
     void start_failsWhenNoActiveDefinition() {
         assertThatThrownBy(() -> engine.start(SCOPE, null))
                 .isInstanceOf(IllegalStateException.class).hasMessageContaining("no active definition");

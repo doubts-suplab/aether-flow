@@ -202,6 +202,7 @@
       <tbody>
         <tr><td><span class="method post">POST</span></td><td><code>/api/v1/tenants/{t}/workflows</code></td><td>Register a workflow definition (step graph)</td></tr>
         <tr><td><span class="method post">POST</span></td><td><code>/api/v1/tenants/{t}/workflows/{key}/instances</code></td><td>Start an instance (drive to first stable state)</td></tr>
+        <tr><td><span class="method post">POST</span></td><td><code>/api/v1/tenants/{t}/workflows/{key}/instances/{id}/cancel</code></td><td>Cancel an instance (withdraws its open task)</td></tr>
         <tr><td><span class="method get">GET</span></td><td><code>/api/v1/tenants/{t}/approvals?role=</code></td><td>The human review queue for a role</td></tr>
         <tr><td><span class="method post">POST</span></td><td><code>/api/v1/tenants/{t}/approvals/{id}/approve</code></td><td>Approve — advance past the gate</td></tr>
         <tr><td><span class="method post">POST</span></td><td><code>/api/v1/tenants/{t}/approvals/{id}/reject</code></td><td>Reject — stop the instance</td></tr>
