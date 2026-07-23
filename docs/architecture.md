@@ -74,7 +74,7 @@ DeferredDecision = (correlationId, tenantId, agentId, summary, confidence, reque
 | `WorkflowDefinitionStore` | `JdbcWorkflowDefinitionStore` | Persist/retrieve definitions (JSONB step graph); scoped |
 | `WorkflowInstanceStore` | `JdbcWorkflowInstanceStore` | Persist every instance transition; the durable state |
 | `ApprovalTaskStore` | `JdbcApprovalTaskStore` | Persist the human review queue; open-task lookups |
-| `WorkflowEnginePort` | `DefaultWorkflowOrchestrationService` | Start / advance instances; resume on approve/reject |
+| `WorkflowEnginePort` | `DefaultWorkflowOrchestrationService` | Start / advance instances; resume on approve/reject; **cancel** (stops the instance, withdraws its open task) |
 | `ApprovalGatewayPort` | `DefaultApprovalGateway` | Grid DEFER → parked human-approval workflow |
 | `SlaEscalationPort` | `SlaEscalationService` | Set-based sweep marking breached PENDING tasks ESCALATED |
 
@@ -108,6 +108,7 @@ Flow owns **no** vector store or embedding — the step graph is plain JSONB, ev
 1. `POST …/instances/{id}/cancel` → `WorkflowEnginePort.cancel` loads the instance; a terminal instance is rejected (409).
 2. If the instance is parked at an approval gate, its open task is `withdraw()`-n (`WITHDRAWN` — closed without a human decision, leaves the queue).
 3. The instance transitions to `CANCELLED` and is persisted. Escalation and the review queue never surface a withdrawn task again.
+4. `GET …/instances/stats` returns per-status instance counts for the scope — an operator view over the whole workflow (RUNNING, WAITING_APPROVAL, COMPLETED, CANCELLED, …).
 
 ### 5.4 SLA escalation (set-based)
 1. Scheduler (`@Scheduled`, default every 5 min) → `SlaEscalationPort.sweep`.

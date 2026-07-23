@@ -88,3 +88,32 @@
 **Docs:**
 - `README.md`, `docs/index.html`, `docs/architecture.md`, `docs/roadmap.md`, `docs/progress.md`
 - GitHub Actions: `ci.yml`, `quality-gate.yml`, `docker-build.yml`
+
+---
+
+## Phase 1 — Orchestration Engine Hardening 🔄 (2 of 4)
+
+**Deliverable 1 — Instance cancellation + operator actions** (`feat(flow): add workflow instance
+cancellation with approval-task withdrawal`): a non-terminal instance can be cancelled by an operator
+(`POST …/instances/{id}/cancel`, `cancelledBy` required); if it is parked, its open approval task is
+`withdraw()`-n (`WITHDRAWN` outcome — closed with no human decision, leaves the queue) and the instance
+stops in `CANCELLED`. Migration **V004** widens the `approval_tasks.outcome` CHECK to allow `WITHDRAWN`.
+
+**Deliverable 2 — Testcontainers coverage green in CI + operator stats**
+(`feat(flow): operator stats endpoint + run Testcontainers ITs in CI`):
+- `maven-failsafe-plugin` wired in the parent (pluginManagement) and activated in `flow-engine`, so the
+  `*IT` Testcontainers tests (`JdbcWorkflowDefinitionStoreIT`, `JdbcWorkflowInstanceStoreIT`,
+  `JdbcApprovalTaskStoreIT` incl. the cancellation-withdrawal case, `SlaEscalationServiceIT`) now run at
+  `verify`. Previously no failsafe plugin existed, so surefire never ran `*IT` and the CI Postgres
+  service was effectively unused.
+- `GET …/instances/stats` — an operator status breakdown (per-status instance counts) that wires the
+  previously-unused `WorkflowInstanceStore.countByStatus`.
+- New `WorkflowInstanceControllerTest` (9, fake engine/store) — start / list / get / cancel / stats,
+  incl. the required-`cancelledBy` 400 path and 404/409.
+- `mvn -DskipITs verify` passes the JaCoCo 80% line gate; ITs run under failsafe in CI.
+
+**Tests — 71 unit tests green (was 57).**
+
+### Remaining Phase 1 (later)
+- **Parallel / branching gateways** — the engine follows a linear `nextStepKey` (own increment).
+- **Definition versioning + migration of in-flight instances** (own increment).

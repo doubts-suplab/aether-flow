@@ -36,6 +36,7 @@ cd ../.. && mvn spring-boot:run -pl flow-api
 | `DELETE` | `/api/v1/tenants/{tenantId}/workflows/{workflowKey}` | Delete a definition |
 | `POST` | `/api/v1/tenants/{tenantId}/workflows/{workflowKey}/instances` | Start an instance (drives to first stable state) |
 | `GET` | `/api/v1/tenants/{tenantId}/workflows/{workflowKey}/instances?status=` | List instances by status |
+| `GET` | `/api/v1/tenants/{tenantId}/workflows/{workflowKey}/instances/stats` | Per-status instance counts (operator view) |
 | `GET` | `/api/v1/tenants/{tenantId}/workflows/{workflowKey}/instances/{id}` | Fetch an instance |
 | `POST` | `/api/v1/tenants/{tenantId}/workflows/{workflowKey}/instances/{id}/cancel` | Cancel an instance (withdraws its open approval task) |
 | `GET` | `/api/v1/tenants/{tenantId}/approvals?role=` | The human review queue (open tasks for a role) |
