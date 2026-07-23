@@ -61,6 +61,9 @@ public record WorkflowDefinition(
             if (step.nextStepKey() != null && keys.stream().noneMatch(k -> k.equals(step.nextStepKey())))
                 throw new IllegalArgumentException(
                         "step " + step.key() + " points to unknown step " + step.nextStepKey());
+            if (step.reworkStepKey() != null && keys.stream().noneMatch(k -> k.equals(step.reworkStepKey())))
+                throw new IllegalArgumentException(
+                        "step " + step.key() + " rework routes to unknown step " + step.reworkStepKey());
         }
     }
 

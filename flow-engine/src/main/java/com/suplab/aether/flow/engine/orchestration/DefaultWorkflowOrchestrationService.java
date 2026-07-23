@@ -81,6 +81,18 @@ public class DefaultWorkflowOrchestrationService implements WorkflowEnginePort {
         var task = requireTask(tenantId, taskId);
         approvalTaskStore.save(task.reject(decidedBy, comment));
         var instance = requireInstance(tenantId, task.instanceId());
+        var definition = requireDefinition(instance.scope(), instance.definitionVersion());
+        var approvalStep = requireStep(definition, instance.currentStepKey());
+        // Branch: a reject on a step that declares a rework target routes there (and drives on) rather
+        // than terminating the instance — a genuine non-linear path (rework loop).
+        if (approvalStep.reworkStepKey() != null) {
+            var reworkStep = requireStep(definition, approvalStep.reworkStepKey());
+            var reworked = instance.moveTo(reworkStep);
+            instanceStore.save(reworked);
+            log.info("Rejected taskId={} instanceId={} by={} — routed to rework step={}",
+                    taskId, instance.id(), decidedBy, reworkStep.key());
+            return drive(reworked, definition);
+        }
         var rejected = instance.reject();
         instanceStore.save(rejected);
         log.info("Rejected taskId={} instanceId={} by={} — instance stopped", taskId, instance.id(), decidedBy);

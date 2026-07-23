@@ -71,6 +71,34 @@ class DefaultWorkflowOrchestrationServiceTest {
     }
 
     @Test
+    void reject_routesToReworkBranchInsteadOfStopping() {
+        // review rejects into a "fix" rework step that loops back to review — a non-linear branch.
+        definitions.save(WorkflowDefinition.create(SCOPE, "Rework", List.of(
+                WorkflowStep.automated("intake", "Intake", "review"),
+                WorkflowStep.humanApprovalWithRework("review", "Review", 60, "finance", "finish", "fix"),
+                WorkflowStep.automated("fix", "Rework", "review"),
+                WorkflowStep.end("finish", "Done"))));
+        var parked = engine.start(SCOPE, "INV-1001");
+        var firstTask = tasks.all().get(0);
+
+        var reworked = engine.reject("acme", firstTask.id(), "bob", "fix the total");
+
+        // Rejected task is closed; the instance is parked again at review after looping through fix.
+        assertThat(tasks.findById("acme", firstTask.id()).orElseThrow().outcome())
+                .isEqualTo(ApprovalOutcome.REJECTED);
+        assertThat(reworked.status()).isEqualTo(WorkflowStatus.WAITING_APPROVAL);
+        assertThat(reworked.currentStepKey()).isEqualTo("review");
+        assertThat(reworked.id()).isEqualTo(parked.id());
+        // a fresh approval task was raised for the re-review
+        assertThat(tasks.findOpenByInstance("acme", parked.id())).isPresent();
+        assertThat(tasks.all()).hasSize(2);
+        // approving the re-review now completes it
+        var secondTask = tasks.findOpenByInstance("acme", parked.id()).orElseThrow();
+        assertThat(engine.approve("acme", secondTask.id(), "carol", "ok").status())
+                .isEqualTo(WorkflowStatus.COMPLETED);
+    }
+
+    @Test
     void reject_stopsInstanceInRejected() {
         definitions.save(approvalWorkflow());
         engine.start(SCOPE, "INV-1001");

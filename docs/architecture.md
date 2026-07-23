@@ -46,7 +46,8 @@ WorkflowDefinition
   ├── nextStep(step)       → graph successor (empty for END)
   └── deactivate()         → active=false (running instances unaffected)
 
-WorkflowStep     = (key, name, type, slaMinutes, assignedRole, nextStepKey)
+WorkflowStep     = (key, name, type, slaMinutes, assignedRole, nextStepKey, reworkStepKey)
+                   reworkStepKey: HUMAN_APPROVAL reject branch (rework loop); null ⇒ reject terminates
 StepType         = AUTOMATED | AGENT | HUMAN_APPROVAL | END
 FlowScope        = (tenantId, workflowKey)   — the ownership + isolation key
 
@@ -104,7 +105,7 @@ Flow owns **no** vector store or embedding — the step graph is plain JSONB, ev
 ### 5.2 Human approval (resume)
 1. `GET …/approvals?role=` → open tasks for a role, oldest first.
 2. `POST …/approvals/{taskId}/approve` → `engine.approve` records the decision, moves the parked instance to the gate's successor, and drives onward to the next park or completion.
-3. `POST …/approvals/{taskId}/reject` → `engine.reject` stops the instance in `REJECTED`.
+3. `POST …/approvals/{taskId}/reject` → `engine.reject`: if the approval step declares a `reworkStepKey`, the instance **branches** to that rework step and drives on (a rework loop — e.g. `review → fix → review`), making the graph non-linear; otherwise the instance stops in `REJECTED`. The `MAX_TRANSITIONS` guard bounds any loop.
 
 ### 5.3 Cancellation (operator withdrawal)
 1. `POST …/instances/{id}/cancel` → `WorkflowEnginePort.cancel` loads the instance; a terminal instance is rejected (409).

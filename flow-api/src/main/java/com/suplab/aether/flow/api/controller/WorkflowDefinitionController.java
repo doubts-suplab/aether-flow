@@ -44,9 +44,9 @@ public class WorkflowDefinitionController {
     /** Request body for registering a workflow definition. */
     public record CreateWorkflowRequest(String workflowKey, String name, List<StepRequest> steps) {}
 
-    /** One step in a create request. */
+    /** One step in a create request. {@code reworkStepKey} is optional (HUMAN_APPROVAL reject branch). */
     public record StepRequest(String key, String name, String type, int slaMinutes,
-                              String assignedRole, String nextStepKey) {}
+                              String assignedRole, String nextStepKey, String reworkStepKey) {}
 
     /**
      * Registers a workflow definition. The first registration for a {@code workflowKey} is version 1;
@@ -131,7 +131,8 @@ public class WorkflowDefinitionController {
         } catch (IllegalArgumentException e) {
             throw new IllegalArgumentException("unknown step type: " + s.type());
         }
-        return new WorkflowStep(s.key(), s.name(), type, s.slaMinutes(), s.assignedRole(), s.nextStepKey());
+        return new WorkflowStep(s.key(), s.name(), type, s.slaMinutes(), s.assignedRole(), s.nextStepKey(),
+                s.reworkStepKey());
     }
 
     private static Map<String, Object> toView(WorkflowDefinition definition) {
@@ -141,7 +142,8 @@ public class WorkflowDefinitionController {
                 "type", s.type().name(),
                 "slaMinutes", s.slaMinutes(),
                 "assignedRole", s.assignedRole() != null ? s.assignedRole() : "",
-                "nextStepKey", s.nextStepKey() != null ? s.nextStepKey() : "")).toList();
+                "nextStepKey", s.nextStepKey() != null ? s.nextStepKey() : "",
+                "reworkStepKey", s.reworkStepKey() != null ? s.reworkStepKey() : "")).toList();
         return Map.of(
                 "id", definition.id().toString(),
                 "workflowKey", definition.workflowKey(),

@@ -41,6 +41,23 @@ class WorkflowDefinitionVersioningTest {
     }
 
     @Test
+    void reworkBranchMustResolveToADeclaredStep() {
+        assertThatThrownBy(() -> WorkflowDefinition.create(SCOPE, "bad", List.of(
+                WorkflowStep.humanApprovalWithRework("review", "Review", 30, "finance", "finish", "nowhere"),
+                WorkflowStep.end("finish", "Done"))))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("rework routes to unknown");
+    }
+
+    @Test
+    void reworkBranchToADeclaredStepIsValid() {
+        var def = WorkflowDefinition.create(SCOPE, "ok", List.of(
+                WorkflowStep.humanApprovalWithRework("review", "Review", 30, "finance", "finish", "fix"),
+                WorkflowStep.automated("fix", "Fix", "review"),
+                WorkflowStep.end("finish", "Done")));
+        assertThat(def.stepByKey("review").orElseThrow().reworkStepKey()).isEqualTo("fix");
+    }
+
+    @Test
     void supersedeValidatesTheNewGraph() {
         // no END step -> invalid, throws before any version is minted
         assertThatThrownBy(() -> v1().supersede("bad", List.of(

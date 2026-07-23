@@ -28,7 +28,7 @@
 
 ---
 
-## Phase 1 — Orchestration Engine Hardening 🔄 (3 of 4)
+## Phase 1 — Orchestration Engine Hardening ✅ (core complete; parallel AND fork/join deferred)
 
 **Goal:** The state machine is fully operational end-to-end under integration tests.
 
@@ -36,7 +36,8 @@
 |---|---|
 | Instance cancellation endpoint + operator actions (withdraws open approval task; `GET …/instances/stats`) | ✅ |
 | Testcontainers coverage green in CI (definition, instance, approval stores, escalation) — `maven-failsafe-plugin` wired; `*IT` run at `verify` | ✅ |
-| Parallel / branching gateways (beyond linear step graphs) | ⏳ |
+| Branching gateways (beyond linear step graphs) — exclusive branching via approval-outcome routing (reject → rework branch, with loops) | ✅ |
+| Parallel (AND) fork/join + data-condition gateways — deferred: needs a multi-token instance model (tracked for a later phase) | ⏳ |
 | Definition versioning — publish new versions; version-pinned execution keeps in-flight instances on their own version | ✅ |
 
 ---

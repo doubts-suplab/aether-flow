@@ -147,3 +147,36 @@ version it started under, closing a latent correctness gap.
   parked instance's step; approve still resumes correctly on v1)
 - `JdbcWorkflowDefinitionStoreIT` — `findByVersion` resolves each version independently of active
 - `mvn -DskipITs verify` passes the JaCoCo 80% gate; ITs run under failsafe in CI.
+
+---
+
+## Phase 1 — deliverable 4: branching gateways (exclusive) ✅
+
+**Commit:** `feat(flow): exclusive branching gateways via approval-outcome rework routing`
+
+The engine previously followed a strictly linear `nextStepKey` and a reject always terminated the
+instance. A `HUMAN_APPROVAL` step can now declare a **`reworkStepKey`**: rejecting it routes the
+instance to that rework step (and drives on) instead of stopping — e.g. `intake → review → finish`
+with `review` reject → `fix → review`, a genuine non-linear branch with a loop. A reject with no
+rework branch still terminates in `REJECTED`.
+
+- `WorkflowStep` gains `reworkStepKey` (7th field; nulled for non-approval steps) +
+  `humanApprovalWithRework(...)` factory. `WorkflowDefinition.validateGraph` requires the rework
+  target to resolve, so a malformed branch never persists.
+- `DefaultWorkflowOrchestrationService.reject` branches to the rework step (resolving the definition
+  by the instance's pinned version) and drives on; the `MAX_TRANSITIONS` guard bounds any loop.
+- `WorkflowDefinitionController.StepRequest` gains `reworkStepKey`; it flows through create and the
+  definition view.
+
+**Deferred (a genuinely larger, separate capability):** parallel (AND) **fork/join** and general
+data-condition (XOR-on-variables) gateways. Both need a **multi-token instance model** (an instance
+today holds a single `currentStepKey`), so they are tracked for a later phase rather than shoehorned in.
+
+**Tests — 84 unit tests green (was 79):**
+- `WorkflowStepTest` — rework field carried on approval gates, nulled elsewhere
+- `WorkflowDefinitionVersioningTest` — rework target must resolve; valid rework graph accepted
+- `DefaultWorkflowOrchestrationServiceTest` — decisive reject → rework → re-park → approve → complete
+- `mvn -DskipITs verify` passes the JaCoCo 80% gate; ITs run under failsafe in CI.
+
+**Phase 1 status:** core deliverables complete (cancellation, ITs-in-CI, versioning, branching);
+parallel AND fork/join deferred. Next: Phase 2 — Human Approval & SLA Governance.

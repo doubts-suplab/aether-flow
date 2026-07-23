@@ -47,8 +47,8 @@ class WorkflowDefinitionControllerTest {
         // A minimal valid two-step graph; `variant` lets a second call differ trivially.
         var name = variant.length > 0 ? variant[0] : "Invoice Approval";
         return new WorkflowDefinitionController.CreateWorkflowRequest(WF, name, List.of(
-                new WorkflowDefinitionController.StepRequest("intake", "Intake", "AUTOMATED", 0, null, "finish"),
-                new WorkflowDefinitionController.StepRequest("finish", "Done", "END", 0, null, null)));
+                new WorkflowDefinitionController.StepRequest("intake", "Intake", "AUTOMATED", 0, null, "finish", null),
+                new WorkflowDefinitionController.StepRequest("finish", "Done", "END", 0, null, null, null)));
     }
 
     @SuppressWarnings("unchecked")
@@ -91,8 +91,8 @@ class WorkflowDefinitionControllerTest {
 
         // second registration with a graph that has no END step -> 400, v1 stays active
         var bad = new WorkflowDefinitionController.CreateWorkflowRequest(WF, "bad", List.of(
-                new WorkflowDefinitionController.StepRequest("a", "A", "AUTOMATED", 0, null, "b"),
-                new WorkflowDefinitionController.StepRequest("b", "B", "AUTOMATED", 0, null, "a")));
+                new WorkflowDefinitionController.StepRequest("a", "A", "AUTOMATED", 0, null, "b", null),
+                new WorkflowDefinitionController.StepRequest("b", "B", "AUTOMATED", 0, null, "a", null)));
         var res = controller.create(TENANT, bad);
 
         assertThat(res.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
