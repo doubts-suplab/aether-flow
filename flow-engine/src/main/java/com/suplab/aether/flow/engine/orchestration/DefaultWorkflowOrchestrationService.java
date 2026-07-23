@@ -62,7 +62,9 @@ public class DefaultWorkflowOrchestrationService implements WorkflowEnginePort {
         var task = requireTask(tenantId, taskId);
         approvalTaskStore.save(task.approve(decidedBy, comment));
         var instance = requireInstance(tenantId, task.instanceId());
-        var definition = requireDefinition(instance.scope());
+        // Resolve the definition the instance is pinned to — never the (possibly newer) active one —
+        // so a version published while this instance was parked cannot change how it resumes.
+        var definition = requireDefinition(instance.scope(), instance.definitionVersion());
         var approvalStep = requireStep(definition, instance.currentStepKey());
         var nextStep = definition.nextStep(approvalStep)
                 .orElseThrow(() -> new IllegalStateException(
@@ -144,9 +146,10 @@ public class DefaultWorkflowOrchestrationService implements WorkflowEnginePort {
                 .orElseThrow(() -> new IllegalArgumentException("instance not found: " + instanceId));
     }
 
-    private WorkflowDefinition requireDefinition(FlowScope scope) {
-        return definitionStore.findActive(scope)
-                .orElseThrow(() -> new IllegalStateException("no active definition for " + scope));
+    private WorkflowDefinition requireDefinition(FlowScope scope, int version) {
+        return definitionStore.findByVersion(scope, version)
+                .orElseThrow(() -> new IllegalStateException(
+                        "no definition version " + version + " for " + scope));
     }
 
     private static WorkflowStep requireStep(WorkflowDefinition definition, String stepKey) {

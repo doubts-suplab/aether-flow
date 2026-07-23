@@ -30,7 +30,7 @@ cd ../.. && mvn spring-boot:run -pl flow-api
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/api/v1/tenants/{tenantId}/workflows` | Register a workflow definition (step graph) |
+| `POST` | `/api/v1/tenants/{tenantId}/workflows` | Register a workflow definition (first = v1; each later call publishes a new version) |
 | `GET` | `/api/v1/tenants/{tenantId}/workflows` | List definitions |
 | `GET` | `/api/v1/tenants/{tenantId}/workflows/{workflowKey}` | Fetch the active definition |
 | `DELETE` | `/api/v1/tenants/{tenantId}/workflows/{workflowKey}` | Delete a definition |

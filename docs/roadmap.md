@@ -28,7 +28,7 @@
 
 ---
 
-## Phase 1 — Orchestration Engine Hardening 🔄 (2 of 4)
+## Phase 1 — Orchestration Engine Hardening 🔄 (3 of 4)
 
 **Goal:** The state machine is fully operational end-to-end under integration tests.
 
@@ -37,7 +37,7 @@
 | Instance cancellation endpoint + operator actions (withdraws open approval task; `GET …/instances/stats`) | ✅ |
 | Testcontainers coverage green in CI (definition, instance, approval stores, escalation) — `maven-failsafe-plugin` wired; `*IT` run at `verify` | ✅ |
 | Parallel / branching gateways (beyond linear step graphs) | ⏳ |
-| Definition versioning + migration of in-flight instances | ⏳ |
+| Definition versioning — publish new versions; version-pinned execution keeps in-flight instances on their own version | ✅ |
 
 ---
 

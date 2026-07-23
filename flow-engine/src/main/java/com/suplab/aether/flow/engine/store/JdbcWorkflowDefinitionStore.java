@@ -87,6 +87,20 @@ public class JdbcWorkflowDefinitionStore implements WorkflowDefinitionStore {
     }
 
     @Override
+    public Optional<WorkflowDefinition> findByVersion(FlowScope scope, int version) {
+        var sql = """
+                SELECT id, tenant_id, workflow_key, name, version, steps, active, created_at, updated_at
+                FROM workflow_definitions
+                WHERE tenant_id = :tenantId AND workflow_key = :workflowKey AND version = :version
+                """;
+        var params = new MapSqlParameterSource()
+                .addValue("tenantId", scope.tenantId())
+                .addValue("workflowKey", scope.workflowKey())
+                .addValue("version", version);
+        return jdbc.query(sql, params, this::mapRow).stream().findFirst();
+    }
+
+    @Override
     public List<WorkflowDefinition> findByTenant(String tenantId, int limit) {
         var sql = """
                 SELECT id, tenant_id, workflow_key, name, version, steps, active, created_at, updated_at

@@ -48,6 +48,14 @@ public final class InMemoryStores {
         }
 
         @Override
+        public Optional<WorkflowDefinition> findByVersion(FlowScope scope, int version) {
+            return byId.values().stream()
+                    .filter(d -> d.tenantId().equals(scope.tenantId())
+                            && d.workflowKey().equals(scope.workflowKey()) && d.version() == version)
+                    .findFirst();
+        }
+
+        @Override
         public List<WorkflowDefinition> findByTenant(String tenantId, int limit) {
             return byId.values().stream()
                     .filter(d -> d.tenantId().equals(tenantId))

@@ -96,8 +96,10 @@ Flow owns **no** vector store or embedding — the step graph is plain JSONB, ev
 ## 5. Key Flows
 
 ### 5.1 Define & start a workflow
-1. `POST …/workflows` → build `WorkflowStep`s from the request; `WorkflowDefinition.create` validates the graph; persist as active v1.
-2. `POST …/workflows/{key}/instances` → `WorkflowEnginePort.start` creates an instance at the start step and **drives** it: automated/agent steps advance immediately; a `HUMAN_APPROVAL` step parks the instance (`WAITING_APPROVAL`) and raises an `ApprovalTask`; `END` completes it.
+1. `POST …/workflows` → build `WorkflowStep`s from the request; the graph is validated on construction. The first registration for a `workflowKey` is **version 1**; each later registration **publishes a new version** (`prior + 1`, `supersede`) and retires the previously active one. The new version is validated *before* the old is deactivated, so an invalid graph leaves the active version untouched. At most one version is active per scope.
+2. `POST …/workflows/{key}/instances` → `WorkflowEnginePort.start` reads the **active** version, creates an instance pinned to that `definitionVersion`, and **drives** it: automated/agent steps advance immediately; a `HUMAN_APPROVAL` step parks the instance (`WAITING_APPROVAL`) and raises an `ApprovalTask`; `END` completes it.
+
+> **Version-pinned execution.** A running instance stores the `definitionVersion` it started under, and the engine resolves each instance against **that** version (`findByVersion`), never the currently-active one. Publishing a new version while an instance is parked therefore never changes how the in-flight instance resumes — the *migration of in-flight instances* is "pin and continue".
 
 ### 5.2 Human approval (resume)
 1. `GET …/approvals?role=` → open tasks for a role, oldest first.

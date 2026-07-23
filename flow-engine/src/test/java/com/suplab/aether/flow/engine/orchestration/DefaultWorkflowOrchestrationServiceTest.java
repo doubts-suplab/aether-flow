@@ -150,6 +150,30 @@ class DefaultWorkflowOrchestrationServiceTest {
     }
 
     @Test
+    void resumeUsesTheInstancePinnedVersionNotTheNewlyActiveOne() {
+        // v1: intake -> review (human) -> finish. Start an instance and park it at review.
+        definitions.save(approvalWorkflow());
+        var parked = engine.start(SCOPE, "INV-1001");
+        var task = tasks.all().get(0);
+
+        // A NEW active version is published while the instance is parked — with a different graph
+        // that does not even contain the "review" step. If the engine resolved by "active" it would
+        // blow up; version-pinning must keep this instance on v1.
+        var v2 = approvalWorkflow().supersede("V2", List.of(
+                WorkflowStep.automated("a", "A", "end"),
+                WorkflowStep.end("end", "End")));
+        definitions.save(v2);
+        assertThat(definitions.findActive(SCOPE).orElseThrow().version()).isEqualTo(2);
+
+        var completed = engine.approve("acme", task.id(), "alice", "ok");
+
+        // Resolved against v1 (the pinned version): review -> finish -> COMPLETED.
+        assertThat(completed.status()).isEqualTo(WorkflowStatus.COMPLETED);
+        assertThat(completed.definitionVersion()).isEqualTo(1);
+        assertThat(completed.id()).isEqualTo(parked.id());
+    }
+
+    @Test
     void start_failsWhenNoActiveDefinition() {
         assertThatThrownBy(() -> engine.start(SCOPE, null))
                 .isInstanceOf(IllegalStateException.class).hasMessageContaining("no active definition");

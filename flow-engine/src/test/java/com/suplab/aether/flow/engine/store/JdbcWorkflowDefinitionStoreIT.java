@@ -75,6 +75,23 @@ class JdbcWorkflowDefinitionStoreIT {
     }
 
     @Test
+    void findByVersion_resolvesEachVersionIndependentlyOfActive() {
+        var scope = uniqueScope();
+        var v1 = WorkflowDefinition.create(scope, "WF v1", steps());
+        store.save(v1);
+        // publish v2 (active) and retire v1 — as the controller does
+        store.save(v1.deactivate());
+        var v2 = v1.supersede("WF v2", steps());
+        store.save(v2);
+
+        assertThat(store.findActive(scope).orElseThrow().version()).isEqualTo(2);
+        assertThat(store.findByVersion(scope, 1).orElseThrow().name()).isEqualTo("WF v1");
+        assertThat(store.findByVersion(scope, 1).orElseThrow().active()).isFalse();
+        assertThat(store.findByVersion(scope, 2).orElseThrow().name()).isEqualTo("WF v2");
+        assertThat(store.findByVersion(scope, 99)).isEmpty();
+    }
+
+    @Test
     void findByTenant_listsDefinitions() {
         var scope = uniqueScope();
         store.save(WorkflowDefinition.create(scope, "WF", steps()));
