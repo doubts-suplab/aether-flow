@@ -71,6 +71,34 @@ class DefaultWorkflowOrchestrationServiceTest {
     }
 
     @Test
+    void reject_routesToReworkBranchInsteadOfStopping() {
+        // review rejects into a "fix" rework step that loops back to review — a non-linear branch.
+        definitions.save(WorkflowDefinition.create(SCOPE, "Rework", List.of(
+                WorkflowStep.automated("intake", "Intake", "review"),
+                WorkflowStep.humanApprovalWithRework("review", "Review", 60, "finance", "finish", "fix"),
+                WorkflowStep.automated("fix", "Rework", "review"),
+                WorkflowStep.end("finish", "Done"))));
+        var parked = engine.start(SCOPE, "INV-1001");
+        var firstTask = tasks.all().get(0);
+
+        var reworked = engine.reject("acme", firstTask.id(), "bob", "fix the total");
+
+        // Rejected task is closed; the instance is parked again at review after looping through fix.
+        assertThat(tasks.findById("acme", firstTask.id()).orElseThrow().outcome())
+                .isEqualTo(ApprovalOutcome.REJECTED);
+        assertThat(reworked.status()).isEqualTo(WorkflowStatus.WAITING_APPROVAL);
+        assertThat(reworked.currentStepKey()).isEqualTo("review");
+        assertThat(reworked.id()).isEqualTo(parked.id());
+        // a fresh approval task was raised for the re-review
+        assertThat(tasks.findOpenByInstance("acme", parked.id())).isPresent();
+        assertThat(tasks.all()).hasSize(2);
+        // approving the re-review now completes it
+        var secondTask = tasks.findOpenByInstance("acme", parked.id()).orElseThrow();
+        assertThat(engine.approve("acme", secondTask.id(), "carol", "ok").status())
+                .isEqualTo(WorkflowStatus.COMPLETED);
+    }
+
+    @Test
     void reject_stopsInstanceInRejected() {
         definitions.save(approvalWorkflow());
         engine.start(SCOPE, "INV-1001");
@@ -147,6 +175,30 @@ class DefaultWorkflowOrchestrationServiceTest {
     void cancel_failsForUnknownInstance() {
         assertThatThrownBy(() -> engine.cancel("acme", UUID.randomUUID(), "ops", null))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("instance not found");
+    }
+
+    @Test
+    void resumeUsesTheInstancePinnedVersionNotTheNewlyActiveOne() {
+        // v1: intake -> review (human) -> finish. Start an instance and park it at review.
+        definitions.save(approvalWorkflow());
+        var parked = engine.start(SCOPE, "INV-1001");
+        var task = tasks.all().get(0);
+
+        // A NEW active version is published while the instance is parked — with a different graph
+        // that does not even contain the "review" step. If the engine resolved by "active" it would
+        // blow up; version-pinning must keep this instance on v1.
+        var v2 = approvalWorkflow().supersede("V2", List.of(
+                WorkflowStep.automated("a", "A", "end"),
+                WorkflowStep.end("end", "End")));
+        definitions.save(v2);
+        assertThat(definitions.findActive(SCOPE).orElseThrow().version()).isEqualTo(2);
+
+        var completed = engine.approve("acme", task.id(), "alice", "ok");
+
+        // Resolved against v1 (the pinned version): review -> finish -> COMPLETED.
+        assertThat(completed.status()).isEqualTo(WorkflowStatus.COMPLETED);
+        assertThat(completed.definitionVersion()).isEqualTo(1);
+        assertThat(completed.id()).isEqualTo(parked.id());
     }
 
     @Test

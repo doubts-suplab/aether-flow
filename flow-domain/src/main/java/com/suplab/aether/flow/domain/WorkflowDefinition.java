@@ -61,6 +61,9 @@ public record WorkflowDefinition(
             if (step.nextStepKey() != null && keys.stream().noneMatch(k -> k.equals(step.nextStepKey())))
                 throw new IllegalArgumentException(
                         "step " + step.key() + " points to unknown step " + step.nextStepKey());
+            if (step.reworkStepKey() != null && keys.stream().noneMatch(k -> k.equals(step.reworkStepKey())))
+                throw new IllegalArgumentException(
+                        "step " + step.key() + " rework routes to unknown step " + step.reworkStepKey());
         }
     }
 
@@ -106,6 +109,23 @@ public record WorkflowDefinition(
     public Optional<WorkflowStep> nextStep(WorkflowStep step) {
         if (step.nextStepKey() == null) return Optional.empty();
         return stepByKey(step.nextStepKey());
+    }
+
+    /**
+     * Returns a new <em>active</em> definition that supersedes this one: a fresh identity at the
+     * next version ({@code this.version + 1}), same scope, with the given name and step graph
+     * (validated on construction). The caller deactivates this (prior) definition so a scope holds
+     * at most one active version. Running instances pinned to an earlier version are unaffected —
+     * the engine resolves each instance against its own {@code definitionVersion}.
+     *
+     * @param newName  the new version's name (falls back to this name when blank)
+     * @param newSteps the new version's step graph
+     * @return a new active definition at {@code version + 1}
+     */
+    public WorkflowDefinition supersede(String newName, List<WorkflowStep> newSteps) {
+        var now = Instant.now();
+        return new WorkflowDefinition(UUID.randomUUID(), tenantId, workflowKey,
+                newName == null || newName.isBlank() ? name : newName, version + 1, newSteps, true, now, now);
     }
 
     /**

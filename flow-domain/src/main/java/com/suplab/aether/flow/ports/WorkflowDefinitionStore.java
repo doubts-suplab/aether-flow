@@ -31,6 +31,17 @@ public interface WorkflowDefinitionStore {
     Optional<WorkflowDefinition> findActive(FlowScope scope);
 
     /**
+     * Returns a specific version of a definition, active or not. The engine resolves a running
+     * instance against the exact version it started under (its {@code definitionVersion}), so a
+     * newly published version never changes how in-flight instances execute.
+     *
+     * @param scope   the owning tenant + workflow key
+     * @param version the definition version to resolve
+     * @return the definition at that version if present, otherwise empty
+     */
+    Optional<WorkflowDefinition> findByVersion(FlowScope scope, int version);
+
+    /**
      * Lists all definitions for a tenant, most recently updated first.
      *
      * @param tenantId the owning tenant

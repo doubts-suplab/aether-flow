@@ -46,7 +46,8 @@ WorkflowDefinition
   ├── nextStep(step)       → graph successor (empty for END)
   └── deactivate()         → active=false (running instances unaffected)
 
-WorkflowStep     = (key, name, type, slaMinutes, assignedRole, nextStepKey)
+WorkflowStep     = (key, name, type, slaMinutes, assignedRole, nextStepKey, reworkStepKey)
+                   reworkStepKey: HUMAN_APPROVAL reject branch (rework loop); null ⇒ reject terminates
 StepType         = AUTOMATED | AGENT | HUMAN_APPROVAL | END
 FlowScope        = (tenantId, workflowKey)   — the ownership + isolation key
 
@@ -96,13 +97,15 @@ Flow owns **no** vector store or embedding — the step graph is plain JSONB, ev
 ## 5. Key Flows
 
 ### 5.1 Define & start a workflow
-1. `POST …/workflows` → build `WorkflowStep`s from the request; `WorkflowDefinition.create` validates the graph; persist as active v1.
-2. `POST …/workflows/{key}/instances` → `WorkflowEnginePort.start` creates an instance at the start step and **drives** it: automated/agent steps advance immediately; a `HUMAN_APPROVAL` step parks the instance (`WAITING_APPROVAL`) and raises an `ApprovalTask`; `END` completes it.
+1. `POST …/workflows` → build `WorkflowStep`s from the request; the graph is validated on construction. The first registration for a `workflowKey` is **version 1**; each later registration **publishes a new version** (`prior + 1`, `supersede`) and retires the previously active one. The new version is validated *before* the old is deactivated, so an invalid graph leaves the active version untouched. At most one version is active per scope.
+2. `POST …/workflows/{key}/instances` → `WorkflowEnginePort.start` reads the **active** version, creates an instance pinned to that `definitionVersion`, and **drives** it: automated/agent steps advance immediately; a `HUMAN_APPROVAL` step parks the instance (`WAITING_APPROVAL`) and raises an `ApprovalTask`; `END` completes it.
+
+> **Version-pinned execution.** A running instance stores the `definitionVersion` it started under, and the engine resolves each instance against **that** version (`findByVersion`), never the currently-active one. Publishing a new version while an instance is parked therefore never changes how the in-flight instance resumes — the *migration of in-flight instances* is "pin and continue".
 
 ### 5.2 Human approval (resume)
 1. `GET …/approvals?role=` → open tasks for a role, oldest first.
 2. `POST …/approvals/{taskId}/approve` → `engine.approve` records the decision, moves the parked instance to the gate's successor, and drives onward to the next park or completion.
-3. `POST …/approvals/{taskId}/reject` → `engine.reject` stops the instance in `REJECTED`.
+3. `POST …/approvals/{taskId}/reject` → `engine.reject`: if the approval step declares a `reworkStepKey`, the instance **branches** to that rework step and drives on (a rework loop — e.g. `review → fix → review`), making the graph non-linear; otherwise the instance stops in `REJECTED`. The `MAX_TRANSITIONS` guard bounds any loop.
 
 ### 5.3 Cancellation (operator withdrawal)
 1. `POST …/instances/{id}/cancel` → `WorkflowEnginePort.cancel` loads the instance; a terminal instance is rejected (409).

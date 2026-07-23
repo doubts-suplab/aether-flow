@@ -36,6 +36,20 @@ class WorkflowStepTest {
     }
 
     @Test
+    void humanApprovalCanCarryAReworkBranch() {
+        var step = WorkflowStep.humanApprovalWithRework("review", "Review", 30, "finance", "finish", "fix");
+        assertThat(step.reworkStepKey()).isEqualTo("fix");
+        // a plain approval gate has no rework branch (reject terminates)
+        assertThat(WorkflowStep.humanApproval("review", "Review", 30, "finance", "finish").reworkStepKey()).isNull();
+    }
+
+    @Test
+    void nonApprovalStepsDropAnyReworkBranch() {
+        // rework routing is an approval-gate concept only — nulled for other types
+        assertThat(new WorkflowStep("a", "A", StepType.AUTOMATED, 0, null, "b", "x").reworkStepKey()).isNull();
+    }
+
+    @Test
     void nameDefaultsToKeyWhenBlank() {
         assertThat(WorkflowStep.automated("a", " ", "b").name()).isEqualTo("a");
     }
@@ -51,25 +65,25 @@ class WorkflowStepTest {
 
     @Test
     void rejectsBlankKeyAndNullTypeAndNegativeSla() {
-        assertThatThrownBy(() -> new WorkflowStep(" ", "n", StepType.END, 0, null, null))
+        assertThatThrownBy(() -> new WorkflowStep(" ", "n", StepType.END, 0, null, null, null))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("step key");
-        assertThatThrownBy(() -> new WorkflowStep("k", "n", null, 0, null, null))
+        assertThatThrownBy(() -> new WorkflowStep("k", "n", null, 0, null, null, null))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("type");
-        assertThatThrownBy(() -> new WorkflowStep("k", "n", StepType.AUTOMATED, -1, null, "x"))
+        assertThatThrownBy(() -> new WorkflowStep("k", "n", StepType.AUTOMATED, -1, null, "x", null))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("slaMinutes");
     }
 
     @Test
     void endStepMustNotDeclareNext() {
-        assertThatThrownBy(() -> new WorkflowStep("e", "E", StepType.END, 0, null, "next"))
+        assertThatThrownBy(() -> new WorkflowStep("e", "E", StepType.END, 0, null, "next", null))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("must not declare");
     }
 
     @Test
     void nonTerminalStepRequiresNext() {
-        assertThatThrownBy(() -> new WorkflowStep("a", "A", StepType.AUTOMATED, 0, null, null))
+        assertThatThrownBy(() -> new WorkflowStep("a", "A", StepType.AUTOMATED, 0, null, null, null))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("requires a nextStepKey");
-        assertThatThrownBy(() -> new WorkflowStep("a", "A", StepType.AUTOMATED, 0, null, " "))
+        assertThatThrownBy(() -> new WorkflowStep("a", "A", StepType.AUTOMATED, 0, null, " ", null))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("requires a nextStepKey");
     }
 }

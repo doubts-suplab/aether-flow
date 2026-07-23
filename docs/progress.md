@@ -117,3 +117,66 @@ stops in `CANCELLED`. Migration **V004** widens the `approval_tasks.outcome` CHE
 ### Remaining Phase 1 (later)
 - **Parallel / branching gateways** — the engine follows a linear `nextStepKey` (own increment).
 - **Definition versioning + migration of in-flight instances** (own increment).
+
+---
+
+## Phase 1 — deliverable 3: definition versioning + version-pinned execution ✅
+
+**Commit:** `feat(flow): definition versioning with version-pinned in-flight execution`
+
+Registering a definition for an existing `workflowKey` now **publishes a new version** (`prior + 1`)
+and retires the old one, and — crucially — a running instance is always executed against the exact
+version it started under, closing a latent correctness gap.
+
+- `WorkflowDefinition.supersede(name, steps)` — mints a new active definition at `version + 1` (new
+  identity, same scope, graph validated on construction).
+- `WorkflowDefinitionStore.findByVersion(scope, version)` (port + JDBC + in-memory fake) — resolve a
+  specific version, active or not.
+- `DefaultWorkflowOrchestrationService.approve` now resolves the definition by the **instance's**
+  `definitionVersion` (`findByVersion`), not `findActive`. Previously a version published while an
+  instance was parked would have driven that instance with the *new* graph — potentially a step that
+  no longer exists. Now in-flight instances "pin and continue".
+- `WorkflowDefinitionController` publishes a new version when one already exists: it builds and
+  **validates** the new version *before* deactivating the old, so an invalid graph leaves the active
+  version untouched; at most one version is active per scope.
+
+**Tests — 79 unit tests green (was 71):**
+- `WorkflowDefinitionVersioningTest` (3) — supersede bumps/validates; `WorkflowDefinitionControllerTest`
+  (4) — v1 then v2-with-retire, invalid-new-graph-leaves-active-untouched
+- `DefaultWorkflowOrchestrationServiceTest` — a decisive version-pinning test (publish a v2 without the
+  parked instance's step; approve still resumes correctly on v1)
+- `JdbcWorkflowDefinitionStoreIT` — `findByVersion` resolves each version independently of active
+- `mvn -DskipITs verify` passes the JaCoCo 80% gate; ITs run under failsafe in CI.
+
+---
+
+## Phase 1 — deliverable 4: branching gateways (exclusive) ✅
+
+**Commit:** `feat(flow): exclusive branching gateways via approval-outcome rework routing`
+
+The engine previously followed a strictly linear `nextStepKey` and a reject always terminated the
+instance. A `HUMAN_APPROVAL` step can now declare a **`reworkStepKey`**: rejecting it routes the
+instance to that rework step (and drives on) instead of stopping — e.g. `intake → review → finish`
+with `review` reject → `fix → review`, a genuine non-linear branch with a loop. A reject with no
+rework branch still terminates in `REJECTED`.
+
+- `WorkflowStep` gains `reworkStepKey` (7th field; nulled for non-approval steps) +
+  `humanApprovalWithRework(...)` factory. `WorkflowDefinition.validateGraph` requires the rework
+  target to resolve, so a malformed branch never persists.
+- `DefaultWorkflowOrchestrationService.reject` branches to the rework step (resolving the definition
+  by the instance's pinned version) and drives on; the `MAX_TRANSITIONS` guard bounds any loop.
+- `WorkflowDefinitionController.StepRequest` gains `reworkStepKey`; it flows through create and the
+  definition view.
+
+**Deferred (a genuinely larger, separate capability):** parallel (AND) **fork/join** and general
+data-condition (XOR-on-variables) gateways. Both need a **multi-token instance model** (an instance
+today holds a single `currentStepKey`), so they are tracked for a later phase rather than shoehorned in.
+
+**Tests — 84 unit tests green (was 79):**
+- `WorkflowStepTest` — rework field carried on approval gates, nulled elsewhere
+- `WorkflowDefinitionVersioningTest` — rework target must resolve; valid rework graph accepted
+- `DefaultWorkflowOrchestrationServiceTest` — decisive reject → rework → re-park → approve → complete
+- `mvn -DskipITs verify` passes the JaCoCo 80% gate; ITs run under failsafe in CI.
+
+**Phase 1 status:** core deliverables complete (cancellation, ITs-in-CI, versioning, branching);
+parallel AND fork/join deferred. Next: Phase 2 — Human Approval & SLA Governance.

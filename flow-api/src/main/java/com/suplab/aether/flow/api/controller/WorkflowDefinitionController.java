@@ -44,14 +44,18 @@ public class WorkflowDefinitionController {
     /** Request body for registering a workflow definition. */
     public record CreateWorkflowRequest(String workflowKey, String name, List<StepRequest> steps) {}
 
-    /** One step in a create request. */
+    /** One step in a create request. {@code reworkStepKey} is optional (HUMAN_APPROVAL reject branch). */
     public record StepRequest(String key, String name, String type, int slaMinutes,
-                              String assignedRole, String nextStepKey) {}
+                              String assignedRole, String nextStepKey, String reworkStepKey) {}
 
     /**
-     * Registers a workflow definition (version 1, active).
+     * Registers a workflow definition. The first registration for a {@code workflowKey} is version 1;
+     * each subsequent registration <strong>publishes a new version</strong> ({@code prior + 1}) and
+     * retires the previously active one. In-flight instances are unaffected — each resolves against
+     * its own pinned version.
      *
-     * @return 201 Created with the definition summary; 400 if the step graph is invalid
+     * @return 201 Created with the (possibly new-version) definition summary; 400 if the step graph
+     *         is invalid
      */
     @PostMapping
     public ResponseEntity<Map<String, Object>> create(@PathVariable String tenantId,
@@ -65,10 +69,16 @@ public class WorkflowDefinitionController {
         try {
             var steps = request.steps().stream().map(WorkflowDefinitionController::toStep).toList();
             var scope = FlowScope.of(tenantId, request.workflowKey());
-            var definition = WorkflowDefinition.create(scope, request.name(), steps);
+            var existing = definitionStore.findActive(scope);
+            // Build (and validate) the new definition BEFORE retiring the old one, so an invalid new
+            // graph leaves the currently active version untouched.
+            var definition = existing
+                    .map(prior -> prior.supersede(request.name(), steps))
+                    .orElseGet(() -> WorkflowDefinition.create(scope, request.name(), steps));
+            existing.ifPresent(prior -> definitionStore.save(prior.deactivate()));
             definitionStore.save(definition);
-            log.info("Registered workflow definition tenantId={} workflowKey={} steps={}",
-                    tenantId, request.workflowKey(), steps.size());
+            log.info("Published workflow definition tenantId={} workflowKey={} version={} steps={}",
+                    tenantId, request.workflowKey(), definition.version(), steps.size());
             return ResponseEntity.status(HttpStatus.CREATED).body(toView(definition));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
@@ -121,7 +131,8 @@ public class WorkflowDefinitionController {
         } catch (IllegalArgumentException e) {
             throw new IllegalArgumentException("unknown step type: " + s.type());
         }
-        return new WorkflowStep(s.key(), s.name(), type, s.slaMinutes(), s.assignedRole(), s.nextStepKey());
+        return new WorkflowStep(s.key(), s.name(), type, s.slaMinutes(), s.assignedRole(), s.nextStepKey(),
+                s.reworkStepKey());
     }
 
     private static Map<String, Object> toView(WorkflowDefinition definition) {
@@ -131,7 +142,8 @@ public class WorkflowDefinitionController {
                 "type", s.type().name(),
                 "slaMinutes", s.slaMinutes(),
                 "assignedRole", s.assignedRole() != null ? s.assignedRole() : "",
-                "nextStepKey", s.nextStepKey() != null ? s.nextStepKey() : "")).toList();
+                "nextStepKey", s.nextStepKey() != null ? s.nextStepKey() : "",
+                "reworkStepKey", s.reworkStepKey() != null ? s.reworkStepKey() : "")).toList();
         return Map.of(
                 "id", definition.id().toString(),
                 "workflowKey", definition.workflowKey(),
