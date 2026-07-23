@@ -116,6 +116,28 @@ public class WorkflowInstanceController {
     }
 
     /**
+     * Returns a status breakdown for the workflow — instance counts per status.
+     *
+     * <p>An operator view over the whole scope: how many instances are RUNNING, WAITING_APPROVAL,
+     * COMPLETED, CANCELLED, and so on.</p>
+     *
+     * @return 200 OK with {@code {tenantId, workflowKey, counts:{STATUS: n, ...}}}
+     */
+    @GetMapping("/stats")
+    public ResponseEntity<Object> stats(@PathVariable String tenantId,
+                                        @PathVariable String workflowKey) {
+        var scope = FlowScope.of(tenantId, workflowKey);
+        var counts = new java.util.LinkedHashMap<String, Long>();
+        for (var status : WorkflowStatus.values()) {
+            counts.put(status.name(), instanceStore.countByStatus(scope, status));
+        }
+        return ResponseEntity.ok(Map.of(
+                "tenantId", tenantId,
+                "workflowKey", workflowKey,
+                "counts", counts));
+    }
+
+    /**
      * Returns a single instance by ID.
      *
      * @return 200 OK with the instance view; 404 if not found in this workflow

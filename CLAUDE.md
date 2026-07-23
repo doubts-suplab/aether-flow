@@ -21,7 +21,7 @@
 
 **Capability owned (exclusively):** *Workflows* — Process Orchestration, Human Approval Steps, State Persistence, Integration with Grid. Flow orchestrates processes; it does not store personal memory (Core), shared memory (Memory), or documents/knowledge (Vault).
 
-**Current status:** Phase 0 — Scaffold. This is the initial bootstrap of the standalone platform.
+**Current status:** Phase 1 — Orchestration Engine Hardening 🔄 (in progress, 2 of 4): instance cancellation (withdraws the open approval task) + operator stats endpoints and Testcontainers ITs wired into CI are done; parallel/branching gateways and definition versioning + in-flight migration remain.
 
 **One runnable application:**
 - `flow-api` — Workflow Platform API (port 8085)
