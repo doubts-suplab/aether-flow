@@ -1,4 +1,4 @@
-# Aether Flow
+# Æ Aether Flow
 
 > Workflow orchestration — the platform layer that defines multi-step human-AI processes, drives them through a persisted state machine, enforces human approval gates with SLAs, and turns Aether Grid's DEFER decisions into review queues, all scoped per tenant.
 
