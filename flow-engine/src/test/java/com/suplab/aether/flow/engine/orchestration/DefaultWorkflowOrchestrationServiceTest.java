@@ -30,7 +30,8 @@ class DefaultWorkflowOrchestrationServiceTest {
         definitions = new InMemoryStores.Definitions();
         instances = new InMemoryStores.Instances();
         tasks = new InMemoryStores.Tasks();
-        engine = new DefaultWorkflowOrchestrationService(definitions, instances, tasks);
+        engine = new DefaultWorkflowOrchestrationService(definitions, instances, tasks,
+                new com.suplab.aether.flow.engine.notification.LoggingApprovalNotifier());
     }
 
     private WorkflowDefinition approvalWorkflow() {

@@ -42,16 +42,18 @@
 
 ---
 
-## Phase 2 — Human Approval & SLA Governance
+## Phase 2 — Human Approval & SLA Governance 🔄 (core complete)
 
 **Goal:** Rich review workflows and escalation policy.
 
 | Deliverable | Status |
 |---|---|
-| Multi-level escalation chains (role → manager → executive) | ⏳ |
-| Per-tenant SLA policy (budgets, business-hours calendars) | ⏳ |
-| Notifications on task raise / breach (webhook, email) | ⏳ |
-| Delegation and reassignment of approval tasks | ⏳ |
+| Multi-level escalation chains (role → manager → executive) — chain-driven sweep, fresh budget per level | ✅ |
+| Per-tenant SLA policy — budgets + escalation chain (`tenant_sla_policy`, V005), GET/PUT endpoint | ✅ |
+| Per-tenant SLA policy — business-hours calendars | ⏳ (follow-up) |
+| Notifications on task raise / escalation — `ApprovalNotificationPort` (logging default) | ✅ |
+| Notification sinks — webhook, email adapters behind the port | ⏳ (follow-up) |
+| Delegation and reassignment of approval tasks (`POST .../approvals/{id}/reassign`) | ✅ |
 
 ---
 

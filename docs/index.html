@@ -104,7 +104,7 @@
   <div class="badges">
     <span class="badge green">Phase 0 — Scaffold ✅</span>
     <span class="badge green">Phase 1 — Orchestration Engine Hardening ✅</span>
-    <span class="badge accent">Parallel AND fork/join deferred</span>
+    <span class="badge accent">Phase 2 — Human Approval &amp; SLA Governance (core)</span>
     <span class="badge">Java 21</span>
     <span class="badge">Spring Boot 3.3</span>
     <span class="badge">PostgreSQL 16</span>
@@ -208,6 +208,8 @@
         <tr><td><span class="method get">GET</span></td><td><code>/api/v1/tenants/{t}/approvals?role=</code></td><td>The human review queue for a role</td></tr>
         <tr><td><span class="method post">POST</span></td><td><code>/api/v1/tenants/{t}/approvals/{id}/approve</code></td><td>Approve — advance past the gate</td></tr>
         <tr><td><span class="method post">POST</span></td><td><code>/api/v1/tenants/{t}/approvals/{id}/reject</code></td><td>Reject — stop the instance</td></tr>
+        <tr><td><span class="method post">POST</span></td><td><code>/api/v1/tenants/{t}/approvals/{id}/reassign</code></td><td>Delegate an open task to another role</td></tr>
+        <tr><td><span class="method get">GET</span> <span class="method post">PUT</span></td><td><code>/api/v1/tenants/{t}/sla-policy</code></td><td>Per-tenant SLA budget + escalation chain</td></tr>
         <tr><td><span class="method post">POST</span></td><td><code>/api/v1/deferrals</code></td><td>Aether Grid DEFER intake → approval workflow</td></tr>
       </tbody>
     </table>
@@ -222,7 +224,7 @@
   <div class="roadmap">
     <div class="roadmap-item"><span class="dot done"></span><span class="phase-label">P0</span><span class="phase-name">Scaffold</span><span class="status-badge done">Complete</span></div>
     <div class="roadmap-item"><span class="dot done"></span><span class="phase-label">P1</span><span class="phase-name">Orchestration Engine Hardening — cancellation, stats, ITs, versioning, rework branching</span><span class="status-badge done">Complete</span></div>
-    <div class="roadmap-item"><span class="dot planned"></span><span class="phase-label">P2</span><span class="phase-name">Human Approval &amp; SLA Governance</span><span class="status-badge planned">Planned</span></div>
+    <div class="roadmap-item"><span class="dot done"></span><span class="phase-label">P2</span><span class="phase-name">Human Approval &amp; SLA Governance — per-tenant SLA policy, multi-level escalation chains, task reassignment, raise/escalation notifications</span><span class="status-badge done">Core Complete</span></div>
     <div class="roadmap-item"><span class="dot planned"></span><span class="phase-label">P3</span><span class="phase-name">Grid Integration Deepening</span><span class="status-badge planned">Planned</span></div>
     <div class="roadmap-item"><span class="dot planned"></span><span class="phase-label">P4</span><span class="phase-name">Kubernetes + Helm</span><span class="status-badge planned">Planned</span></div>
   </div>

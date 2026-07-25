@@ -21,7 +21,7 @@
 
 **Capability owned (exclusively):** *Workflows* — Process Orchestration, Human Approval Steps, State Persistence, Integration with Grid. Flow orchestrates processes; it does not store personal memory (Core), shared memory (Memory), or documents/knowledge (Vault).
 
-**Current status:** Phase 1 — Orchestration Engine Hardening ✅ (core complete): instance cancellation (withdraws the open approval task) + operator stats, Testcontainers ITs in CI, definition versioning with version-pinned execution, and exclusive branching gateways (approval reject → rework branch, with loops). Deferred: parallel (AND) fork/join + data-condition gateways (need a multi-token instance model). Next: Phase 2 — Human Approval & SLA Governance.
+**Current status:** Phase 1 — Orchestration Engine Hardening ✅ (instance cancellation, operator stats, definition versioning, exclusive branching gateways; parallel AND fork/join deferred). Phase 2 — Human Approval & SLA Governance 🔄 core complete: per-tenant `SlaPolicy` (SLA budget + ordered escalation chain), **multi-level chain-driven escalation** (breach → reassign up role → manager → executive with a fresh budget per level), task **reassignment/delegation**, and an `ApprovalNotificationPort` (logging default) firing on raise + escalation; Testcontainers ITs. Follow-up: business-hours calendars, webhook/email notification sinks.
 
 **One runnable application:**
 - `flow-api` — Workflow Platform API (port 8085)
@@ -56,7 +56,8 @@
 - REST API surface:
   - `.../tenants/{tenantId}/workflows` — workflow definition CRUD
   - `.../tenants/{tenantId}/workflows/{workflowKey}/instances` — start / query running instances
-  - `.../tenants/{tenantId}/approvals` — human review queue + approve/reject
+  - `.../tenants/{tenantId}/approvals` — human review queue + approve/reject/reassign
+  - `.../tenants/{tenantId}/sla-policy` — per-tenant SLA budget + escalation chain (GET/PUT)
   - `POST /api/v1/deferrals` — Aether Grid DEFER intake
 
 ---
@@ -93,9 +94,10 @@ flow-infra  (no Java)
 | **WorkflowStep** | A node in the graph — `AUTOMATED`, `AGENT`, `HUMAN_APPROVAL`, or `END`. Approval steps carry an SLA budget and an assigned role. |
 | **WorkflowInstance** | A running (or finished) execution, pinned to a definition version. Its persisted state is what survives restarts. |
 | **FlowScope** | The `tenantId` + `workflowKey` ownership key — the multi-tenancy boundary. |
-| **ApprovalTask** | A human review gate raised at a `HUMAN_APPROVAL` step, with an SLA deadline. Approve / reject / escalate; withdrawn if its instance is cancelled. |
+| **ApprovalTask** | A human review gate raised at a `HUMAN_APPROVAL` step, with an SLA deadline and an escalation level. Approve / reject / escalate / reassign (delegate); withdrawn if its instance is cancelled. |
 | **DeferredDecision** | The bounded projection Aether Grid sends when its confidence gate defers a decision to a human. |
-| **SLA Escalation** | A scheduled sweep that flags breached `PENDING` tasks as `ESCALATED` — raises visibility, never auto-decides. |
+| **SlaPolicy** | Per-tenant SLA budget + ordered escalation chain of roles (business-hours calendars deferred). |
+| **SLA Escalation** | A scheduled sweep that routes breached open tasks up the tenant's escalation chain (reassign + fresh budget per level), or flags `ESCALATED` when no chain — raises visibility, never auto-decides. |
 
 ---
 
@@ -129,7 +131,7 @@ Before writing any code:
 - All workflow, instance, and approval queries scoped by `tenant_id` (and `workflow_key` where applicable) — no cross-tenant read path
 - A `WorkflowDefinition` is validated on construction: exactly one END step, unique step keys, every transition resolvable — malformed processes never persist
 - Every state transition is persisted — workflow state must survive a service restart (the *State Persistence* capability)
-- Escalation **marks** breached tasks `ESCALATED`; it never approves, rejects, or deletes — a human always decides
+- Escalation **routes** breached tasks up the tenant's chain (reassign + fresh budget) or **marks** them `ESCALATED` when no chain — it never approves, rejects, or deletes; a human always decides
 - The Grid DEFER projection (`DeferredDecision`) carries no Grid internals, no PII, no raw request payloads — only a bounded summary + coarse provenance
 - Confidence < 0.8 is Grid's gate — Flow receives what Grid defers; it never auto-decides a deferral
 - Flow is a *platform* layer — it must run standalone without Core, Grid, Memory, or Vault present

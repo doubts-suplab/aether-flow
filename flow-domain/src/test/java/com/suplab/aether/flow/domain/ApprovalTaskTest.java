@@ -87,6 +87,47 @@ class ApprovalTaskTest {
     }
 
     @Test
+    void escalateToChain_bumpsLevelReassignsAndResetsDeadline() {
+        var original = ApprovalTask.raise(parkedInstance(60), reviewStep(60), "reviewer");
+        var newDue = Instant.now().plusSeconds(1800);
+        var escalated = original.escalate("manager", newDue);
+
+        assertThat(escalated.outcome()).isEqualTo(ApprovalOutcome.ESCALATED);
+        assertThat(escalated.escalationLevel()).isEqualTo(1);
+        assertThat(escalated.assignedRole()).isEqualTo("manager");
+        assertThat(escalated.slaDueAt()).isEqualTo(newDue);
+
+        var again = escalated.escalate("executive", null);
+        assertThat(again.escalationLevel()).isEqualTo(2);
+        assertThat(again.assignedRole()).isEqualTo("executive");
+        assertThat(again.slaDueAt()).isEqualTo(newDue); // null newDueAt keeps the deadline
+    }
+
+    @Test
+    void escalateNoArg_flagsWithoutReassigning() {
+        var escalated = ApprovalTask.raise(parkedInstance(60), reviewStep(60), "reviewer").escalate();
+        assertThat(escalated.assignedRole()).isEqualTo("reviewer");
+        assertThat(escalated.escalationLevel()).isEqualTo(1);
+    }
+
+    @Test
+    void reassign_movesOpenTaskToAnotherRole() {
+        var reassigned = ApprovalTask.raise(parkedInstance(60), reviewStep(60), "reviewer").reassign("audit");
+        assertThat(reassigned.assignedRole()).isEqualTo("audit");
+        assertThat(reassigned.outcome()).isEqualTo(ApprovalOutcome.PENDING);
+        assertThat(reassigned.escalationLevel()).isZero();
+    }
+
+    @Test
+    void reassign_rejectsBlankRoleAndResolvedTasks() {
+        var open = ApprovalTask.raise(parkedInstance(60), reviewStep(60), "reviewer");
+        assertThatThrownBy(() -> open.reassign(" "))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("newRole");
+        var decided = open.approve("alice", null);
+        assertThatThrownBy(() -> decided.reassign("audit")).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
     void decidingAnAlreadyDecidedTaskFails() {
         var task = ApprovalTask.raise(parkedInstance(60), reviewStep(60), "reviewer").approve("alice", null);
         assertThatThrownBy(() -> task.approve("bob", null)).isInstanceOf(IllegalStateException.class);
@@ -125,11 +166,11 @@ class ApprovalTaskTest {
     @Test
     void rejectsInvalidConstruction() {
         var iid = UUID.randomUUID();
-        assertThatThrownBy(() -> new ApprovalTask(null, " ", iid, "wf", "s", "r", null, null, null, null, null, null))
+        assertThatThrownBy(() -> new ApprovalTask(null, " ", iid, "wf", "s", "r", null, null, null, null, null, null, 0))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("tenantId");
-        assertThatThrownBy(() -> new ApprovalTask(null, "t", null, "wf", "s", "r", null, null, null, null, null, null))
+        assertThatThrownBy(() -> new ApprovalTask(null, "t", null, "wf", "s", "r", null, null, null, null, null, null, 0))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("instanceId");
-        assertThatThrownBy(() -> new ApprovalTask(null, "t", iid, "wf", " ", "r", null, null, null, null, null, null))
+        assertThatThrownBy(() -> new ApprovalTask(null, "t", iid, "wf", " ", "r", null, null, null, null, null, null, 0))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("stepKey");
     }
 }

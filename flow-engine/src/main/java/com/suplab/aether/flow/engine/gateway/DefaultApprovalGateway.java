@@ -7,6 +7,7 @@ import com.suplab.aether.flow.domain.WorkflowDefinition;
 import com.suplab.aether.flow.domain.WorkflowInstance;
 import com.suplab.aether.flow.domain.WorkflowStep;
 import com.suplab.aether.flow.ports.ApprovalGatewayPort;
+import com.suplab.aether.flow.ports.ApprovalNotificationPort;
 import com.suplab.aether.flow.ports.ApprovalTaskStore;
 import com.suplab.aether.flow.ports.WorkflowDefinitionStore;
 import com.suplab.aether.flow.ports.WorkflowInstanceStore;
@@ -43,6 +44,7 @@ public class DefaultApprovalGateway implements ApprovalGatewayPort {
     private final WorkflowDefinitionStore definitionStore;
     private final WorkflowInstanceStore instanceStore;
     private final ApprovalTaskStore approvalTaskStore;
+    private final ApprovalNotificationPort notifier;
     private final int deferralSlaMinutes;
 
     /**
@@ -51,10 +53,12 @@ public class DefaultApprovalGateway implements ApprovalGatewayPort {
     public DefaultApprovalGateway(WorkflowDefinitionStore definitionStore,
                                   WorkflowInstanceStore instanceStore,
                                   ApprovalTaskStore approvalTaskStore,
+                                  ApprovalNotificationPort notifier,
                                   int deferralSlaMinutes) {
         this.definitionStore = definitionStore;
         this.instanceStore = instanceStore;
         this.approvalTaskStore = approvalTaskStore;
+        this.notifier = notifier;
         this.deferralSlaMinutes = deferralSlaMinutes;
     }
 
@@ -69,6 +73,7 @@ public class DefaultApprovalGateway implements ApprovalGatewayPort {
 
         var task = ApprovalTask.raise(instance, reviewStep, decision.requestedRole());
         approvalTaskStore.save(task);
+        notifyRaised(task);
 
         log.info("Accepted Grid deferral correlationId={} tenantId={} confidence={} -> instanceId={} taskId={} role={}",
                 decision.correlationId(), decision.tenantId(), decision.confidence(), instance.id(),
@@ -87,4 +92,14 @@ public class DefaultApprovalGateway implements ApprovalGatewayPort {
                 scope.tenantId(), deferralSlaMinutes);
         return definition;
     }
+
+    /** Best-effort raise notification — a failing sink must never break deferral intake. */
+    private void notifyRaised(ApprovalTask task) {
+        try {
+            notifier.notifyRaised(task);
+        } catch (RuntimeException e) {
+            log.warn("Raise notification failed for taskId={}: {}", task.id(), e.getMessage());
+        }
+    }
 }
+
