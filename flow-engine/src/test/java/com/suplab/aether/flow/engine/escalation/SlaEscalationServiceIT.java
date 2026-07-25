@@ -36,6 +36,7 @@ class SlaEscalationServiceIT {
     private SlaEscalationService service;
     private JdbcApprovalTaskStore taskStore;
     private JdbcWorkflowInstanceStore instanceStore;
+    private com.suplab.aether.flow.engine.store.JdbcSlaPolicyStore policyStore;
 
     @BeforeEach
     void setUp() {
@@ -43,9 +44,11 @@ class SlaEscalationServiceIT {
                 POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
         Flyway.configure().dataSource(dataSource).locations("classpath:db/migration").load().migrate();
         var jdbc = new NamedParameterJdbcTemplate(dataSource);
-        service = new SlaEscalationService(jdbc);
         taskStore = new JdbcApprovalTaskStore(jdbc);
         instanceStore = new JdbcWorkflowInstanceStore(jdbc);
+        policyStore = new com.suplab.aether.flow.engine.store.JdbcSlaPolicyStore(jdbc);
+        service = new SlaEscalationService(taskStore, policyStore,
+                new com.suplab.aether.flow.engine.notification.LoggingApprovalNotifier());
     }
 
     /** Raises a task with the given SLA budget (0 => already breached at save time). */
@@ -86,5 +89,21 @@ class SlaEscalationServiceIT {
 
         // second sweep re-escalates nothing (already ESCALATED, no longer PENDING)
         assertThat(second.escalatedCount()).isZero();
+    }
+
+    @Test
+    void sweep_routesBreachedTaskUpTheTenantChain() {
+        var tenant = "tenant-" + UUID.randomUUID();
+        policyStore.save(new com.suplab.aether.flow.domain.SlaPolicy(tenant, 30, List.of("lead", "manager")));
+        var breached = raiseTask(tenant, 0);
+
+        service.sweep();
+
+        var stored = taskStore.findById(tenant, breached.id()).orElseThrow();
+        assertThat(stored.outcome()).isEqualTo(ApprovalOutcome.ESCALATED);
+        assertThat(stored.assignedRole()).isEqualTo("lead");
+        assertThat(stored.escalationLevel()).isEqualTo(1);
+        // fresh 30-minute budget granted to the next authority → no longer breached
+        assertThat(stored.slaDueAt()).isAfter(java.time.Instant.now());
     }
 }

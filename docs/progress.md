@@ -5,15 +5,64 @@
 
 ---
 
-**Active Phase:** Phase 1 — Orchestration Engine Hardening 🔄 (in progress)
+**Active Phase:** Phase 2 — Human Approval & SLA Governance 🔄 (core complete: SLA policy + chain escalation + reassignment + notifications; business-hours + webhook/email follow-up)
 
 | Phase | Name | Status | Sessions |
 |---|---|---|---|
 | 0 | Scaffold | ✅ Complete | 1 |
-| 1 | Orchestration Engine Hardening | 🔄 In progress | 2 |
-| 2 | Human Approval & SLA Governance | ⏳ Planned | — |
+| 1 | Orchestration Engine Hardening | ✅ Complete | 2 |
+| 2 | Human Approval & SLA Governance | 🔄 Core complete (policy + chains + reassign + notify) | 3 |
 | 3 | Grid Integration Deepening | ⏳ Planned | — |
 | 4 | Kubernetes + Helm | ⏳ Planned | — |
+
+---
+
+## Phase 2 — Human Approval & SLA Governance 🔄 (session 3 — SLA policy, escalation chains, reassignment, notifications)
+
+**Commit:** `feat(flow): per-tenant SLA policy, multi-level escalation chains, reassignment, notifications (V005)`
+
+Phase 1 hardened the orchestration engine; escalation only *flagged* a breached task `ESCALATED`.
+Phase 2 turns escalation into a governed, multi-level workflow and adds the reviewer-facing controls.
+
+### What was done
+
+**Per-tenant SLA policy (governance):**
+- `SlaPolicy` domain record (SLA budget + ordered escalation chain of roles), `SlaPolicyStore` port +
+  `JdbcSlaPolicyStore` (upsert per tenant, chain stored as CSV), and `SlaPolicyController`
+  (`GET`/`PUT /api/v1/tenants/{tenantId}/sla-policy`). Business-hours calendars deferred.
+
+**Multi-level escalation chains:**
+- `ApprovalTask` gains `escalationLevel` and a chain-aware `escalate(nextRole, newDueAt)` (reassign +
+  fresh budget, level bumped) alongside the flag-only `escalate()`.
+- `SlaEscalationService` reworked from a set-based `UPDATE` to a policy-driven sweep: it loads
+  breached open tasks + each tenant's policy, and routes a task at level *L* to `chain[L]` with a
+  fresh budget — climbing role → manager → executive across sweeps; exhausted chain stays `ESCALATED`.
+  New `ApprovalTaskStore.findBreachedOpen` + `countOpen` back it. Escalation still never decides.
+
+**Delegation / reassignment:**
+- `ApprovalTask.reassign(newRole)` (open-only) + `POST /api/v1/tenants/{tenantId}/approvals/{id}/reassign`
+  hand an open task to another role's queue without deciding it.
+
+**Notifications:**
+- `ApprovalNotificationPort` (domain) with the dependency-free `LoggingApprovalNotifier` default,
+  fired on task **raise** (orchestration engine + Grid deferral gateway) and on **escalation** (the
+  sweep). Webhook/email sinks are adapters behind the same port (follow-up). Notification is
+  best-effort — a failing sink never breaks raising or the sweep.
+
+**Migration V005** — `tenant_sla_policy` table + `approval_tasks.escalation_level` column (api +
+flow-engine test + flow-infra copies). The `approval_tasks` UPSERT now also persists `assigned_role`,
+`sla_due_at`, and `escalation_level` so reassignment and escalation survive.
+
+**Tests — 104 unit tests green (was 84):**
+- Domain `SlaPolicyTest`, `ApprovalTaskTest` (reassign + chain-escalate cases); engine
+  `SlaEscalationServiceTest` (chain routing, exhaustion, empty-chain idempotency, notifier counts);
+  api `SlaPolicyControllerTest` + `ApprovalTaskControllerTest` (reassign 200/400/404/409).
+- ITs: `JdbcSlaPolicyStoreIT` + a chain-routing case in `SlaEscalationServiceIT`, under failsafe.
+- `mvn -DskipITs verify` passes the JaCoCo 80% gate.
+
+### Remaining Phase 2 (follow-up)
+- **Business-hours calendars** in `SlaPolicy` (SLA clock pauses outside working hours).
+- **Webhook / email notification sinks** behind `ApprovalNotificationPort`.
 
 ---
 

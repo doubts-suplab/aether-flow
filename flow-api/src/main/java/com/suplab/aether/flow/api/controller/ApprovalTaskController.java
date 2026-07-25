@@ -43,6 +43,9 @@ public class ApprovalTaskController {
     /** Request body for a decision. */
     public record DecisionRequest(String decidedBy, String comment) {}
 
+    /** Request body for reassigning (delegating) a task to another role. */
+    public record ReassignRequest(String assignedRole) {}
+
     /**
      * Lists open (PENDING or ESCALATED) tasks for a role, oldest waiting first.
      *
@@ -92,6 +95,33 @@ public class ApprovalTaskController {
         return decide(tenantId, taskId, request, false);
     }
 
+    /**
+     * Reassigns (delegates) an open task to a different role. Does not decide the task — it stays open
+     * in the new role's queue.
+     *
+     * @return 200 OK with the reassigned task view; 400 if the role is missing; 404 if unknown;
+     *         409 if the task is already resolved
+     */
+    @PostMapping("/{taskId}/reassign")
+    public ResponseEntity<Object> reassign(@PathVariable String tenantId, @PathVariable UUID taskId,
+                                           @RequestBody ReassignRequest request) {
+        if (request == null || request.assignedRole() == null || request.assignedRole().isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "assignedRole is required"));
+        }
+        var existing = approvalTaskStore.findById(tenantId, taskId);
+        if (existing.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "approval task not found"));
+        }
+        try {
+            var reassigned = existing.get().reassign(request.assignedRole());
+            approvalTaskStore.save(reassigned);
+            log.info("Reassigned taskId={} tenantId={} -> role={}", taskId, tenantId, reassigned.assignedRole());
+            return ResponseEntity.ok(toView(reassigned));
+        } catch (IllegalStateException e) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", e.getMessage()));
+        }
+    }
+
     private ResponseEntity<Object> decide(String tenantId, UUID taskId, DecisionRequest request,
                                           boolean approve) {
         if (request == null || request.decidedBy() == null || request.decidedBy().isBlank()) {
@@ -119,6 +149,7 @@ public class ApprovalTaskController {
         view.put("stepKey", task.stepKey());
         view.put("assignedRole", task.assignedRole());
         view.put("outcome", task.outcome().name());
+        view.put("escalationLevel", task.escalationLevel());
         view.put("slaDueAt", task.slaDueAt().toString());
         view.put("createdAt", task.createdAt().toString());
         view.put("decidedBy", task.decidedBy());

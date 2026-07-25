@@ -5,6 +5,7 @@ import com.suplab.aether.flow.domain.FlowScope;
 import com.suplab.aether.flow.domain.WorkflowDefinition;
 import com.suplab.aether.flow.domain.WorkflowInstance;
 import com.suplab.aether.flow.domain.WorkflowStep;
+import com.suplab.aether.flow.ports.ApprovalNotificationPort;
 import com.suplab.aether.flow.ports.ApprovalTaskStore;
 import com.suplab.aether.flow.ports.WorkflowDefinitionStore;
 import com.suplab.aether.flow.ports.WorkflowEnginePort;
@@ -37,13 +38,16 @@ public class DefaultWorkflowOrchestrationService implements WorkflowEnginePort {
     private final WorkflowDefinitionStore definitionStore;
     private final WorkflowInstanceStore instanceStore;
     private final ApprovalTaskStore approvalTaskStore;
+    private final ApprovalNotificationPort notifier;
 
     public DefaultWorkflowOrchestrationService(WorkflowDefinitionStore definitionStore,
                                                WorkflowInstanceStore instanceStore,
-                                               ApprovalTaskStore approvalTaskStore) {
+                                               ApprovalTaskStore approvalTaskStore,
+                                               ApprovalNotificationPort notifier) {
         this.definitionStore = definitionStore;
         this.instanceStore = instanceStore;
         this.approvalTaskStore = approvalTaskStore;
+        this.notifier = notifier;
     }
 
     @Override
@@ -128,6 +132,7 @@ public class DefaultWorkflowOrchestrationService implements WorkflowEnginePort {
                 instanceStore.save(parked);
                 var task = ApprovalTask.raise(parked, step, step.assignedRole());
                 approvalTaskStore.save(task);
+                notifyRaised(task);
                 log.info("Parked instanceId={} at approval step={} taskId={} slaDueAt={}",
                         parked.id(), step.key(), task.id(), task.slaDueAt());
                 return parked;
@@ -168,5 +173,14 @@ public class DefaultWorkflowOrchestrationService implements WorkflowEnginePort {
         return definition.stepByKey(stepKey)
                 .orElseThrow(() -> new IllegalStateException(
                         "step " + stepKey + " not found in definition " + definition.workflowKey()));
+    }
+
+    /** Best-effort raise notification — a failing sink must never break workflow progression. */
+    private void notifyRaised(ApprovalTask task) {
+        try {
+            notifier.notifyRaised(task);
+        } catch (RuntimeException e) {
+            log.warn("Raise notification failed for taskId={}: {}", task.id(), e.getMessage());
+        }
     }
 }

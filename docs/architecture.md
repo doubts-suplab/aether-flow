@@ -74,10 +74,12 @@ DeferredDecision = (correlationId, tenantId, agentId, summary, confidence, reque
 |---|---|---|
 | `WorkflowDefinitionStore` | `JdbcWorkflowDefinitionStore` | Persist/retrieve definitions (JSONB step graph); scoped |
 | `WorkflowInstanceStore` | `JdbcWorkflowInstanceStore` | Persist every instance transition; the durable state |
-| `ApprovalTaskStore` | `JdbcApprovalTaskStore` | Persist the human review queue; open-task lookups |
-| `WorkflowEnginePort` | `DefaultWorkflowOrchestrationService` | Start / advance instances; resume on approve/reject; **cancel** (stops the instance, withdraws its open task) |
-| `ApprovalGatewayPort` | `DefaultApprovalGateway` | Grid DEFER → parked human-approval workflow |
-| `SlaEscalationPort` | `SlaEscalationService` | Set-based sweep marking breached PENDING tasks ESCALATED |
+| `ApprovalTaskStore` | `JdbcApprovalTaskStore` | Persist the human review queue; open-task lookups; breached-task batch + open count for the sweep |
+| `SlaPolicyStore` | `JdbcSlaPolicyStore` | Per-tenant SLA budget + escalation chain (upsert by tenant) |
+| `ApprovalNotificationPort` | `LoggingApprovalNotifier` | Reviewer notifications on task raise + escalation (logging default; webhook/email are adapters behind the port) |
+| `WorkflowEnginePort` | `DefaultWorkflowOrchestrationService` | Start / advance instances; resume on approve/reject; **cancel** (stops the instance, withdraws its open task); notifies on raise |
+| `ApprovalGatewayPort` | `DefaultApprovalGateway` | Grid DEFER → parked human-approval workflow; notifies on raise |
+| `SlaEscalationPort` | `SlaEscalationService` | Policy-driven sweep routing breached tasks up the tenant's escalation chain (reassign + fresh budget per level), or flagging ESCALATED when no chain |
 
 ---
 
@@ -89,6 +91,7 @@ DeferredDecision = (correlationId, tenantId, agentId, summary, confidence, reque
 | `V002` | `workflow_instances` | Durable execution state; index on `(tenant_id, workflow_key, status, updated_at)` and on `business_key` |
 | `V003` | `approval_tasks` | Human review queue; `instance_id` FK `ON DELETE CASCADE`; partial index for the open queue and for the SLA sweep (`outcome='PENDING'` by `sla_due_at`) |
 | `V004` | `approval_tasks.outcome` CHECK | Extends the outcome constraint to allow `WITHDRAWN` (a task closed because its instance was cancelled) |
+| `V005` | `tenant_sla_policy` + `approval_tasks.escalation_level` | Per-tenant SLA budget + comma-separated escalation chain (one row per tenant); `escalation_level` tracks how far a task has climbed the chain (drives the next hop) |
 
 Flow owns **no** vector store or embedding — the step graph is plain JSONB, everything else is relational. This keeps Flow single-store on PostgreSQL like the rest of the ecosystem, with no LLM runtime dependency.
 
@@ -106,6 +109,7 @@ Flow owns **no** vector store or embedding — the step graph is plain JSONB, ev
 1. `GET …/approvals?role=` → open tasks for a role, oldest first.
 2. `POST …/approvals/{taskId}/approve` → `engine.approve` records the decision, moves the parked instance to the gate's successor, and drives onward to the next park or completion.
 3. `POST …/approvals/{taskId}/reject` → `engine.reject`: if the approval step declares a `reworkStepKey`, the instance **branches** to that rework step and drives on (a rework loop — e.g. `review → fix → review`), making the graph non-linear; otherwise the instance stops in `REJECTED`. The `MAX_TRANSITIONS` guard bounds any loop.
+4. `POST …/approvals/{taskId}/reassign` → delegates an open task to another role (`ApprovalTask.reassign`); the task stays open in the new role's queue, its outcome, deadline, and escalation level unchanged. Raising a task fires `ApprovalNotificationPort.notifyRaised`.
 
 ### 5.3 Cancellation (operator withdrawal)
 1. `POST …/instances/{id}/cancel` → `WorkflowEnginePort.cancel` loads the instance; a terminal instance is rejected (409).
@@ -113,10 +117,11 @@ Flow owns **no** vector store or embedding — the step graph is plain JSONB, ev
 3. The instance transitions to `CANCELLED` and is persisted. Escalation and the review queue never surface a withdrawn task again.
 4. `GET …/instances/stats` returns per-status instance counts for the scope — an operator view over the whole workflow (RUNNING, WAITING_APPROVAL, COMPLETED, CANCELLED, …).
 
-### 5.4 SLA escalation (set-based)
+### 5.4 SLA escalation (policy-driven, chain-routed)
 1. Scheduler (`@Scheduled`, default every 5 min) → `SlaEscalationPort.sweep`.
-2. Single `UPDATE`: `PENDING` tasks with `sla_due_at < NOW()` become `ESCALATED` (still open — a human must decide).
-3. Micrometer: `aether.flow.escalation.escalated` counter, `aether.flow.approvals.open` gauge.
+2. The sweep loads a batch of breached open tasks (`outcome IN (PENDING, ESCALATED) AND sla_due_at < NOW()`, oldest first) and, per task, loads the tenant's `SlaPolicy` (cached per sweep; default budget + empty chain when none stored).
+3. Routing: a task at `escalation_level = L` whose policy chain has a role at `L` is **reassigned** to that role, flagged `ESCALATED`, given a **fresh SLA budget** (`default_sla_minutes`), and its level bumped — so a still-unactioned task climbs role → manager → executive across successive sweeps. When the chain is exhausted the task stays `ESCALATED` (visibility only). A tenant with no chain keeps the original behaviour: a breached `PENDING` task is flagged `ESCALATED` once. Escalation never decides — a human always does.
+4. Each escalation fires `ApprovalNotificationPort.notifyEscalated`. Micrometer: `aether.flow.escalation.escalated` counter, `aether.flow.approvals.open` gauge.
 
 ### 5.5 Grid DEFER intake
 1. Grid's confidence gate (`confidence < 0.8`) defers a decision and POSTs a bounded `DeferredDecision` to `/api/v1/deferrals`.

@@ -2,6 +2,7 @@ package com.suplab.aether.flow.ports;
 
 import com.suplab.aether.flow.domain.ApprovalTask;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -51,4 +52,23 @@ public interface ApprovalTaskStore {
      * @return the instance's open task, or empty if none is open
      */
     Optional<ApprovalTask> findOpenByInstance(String tenantId, UUID instanceId);
+
+    /**
+     * Lists open tasks (PENDING or ESCALATED) whose SLA deadline has passed — the candidates the
+     * escalation sweep processes. This is a <em>system</em> read across all tenants (the sweep is not
+     * tenant-scoped), ordered oldest-deadline first so the most overdue reviews are handled first.
+     *
+     * @param asOf  the sweep instant; tasks with {@code sla_due_at < asOf} are breached
+     * @param limit maximum number of tasks to return in one batch
+     * @return breached open tasks (may be empty)
+     */
+    List<ApprovalTask> findBreachedOpen(Instant asOf, int limit);
+
+    /**
+     * Counts all open tasks (PENDING or ESCALATED) across tenants — the size of the live review
+     * backlog. Used by the escalation sweep to report how many tasks remain open after a run.
+     *
+     * @return the number of open tasks
+     */
+    long countOpen();
 }

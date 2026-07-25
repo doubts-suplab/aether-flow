@@ -3,13 +3,17 @@ package com.suplab.aether.flow.api.config;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.suplab.aether.flow.engine.escalation.SlaEscalationService;
 import com.suplab.aether.flow.engine.gateway.DefaultApprovalGateway;
+import com.suplab.aether.flow.engine.notification.LoggingApprovalNotifier;
 import com.suplab.aether.flow.engine.orchestration.DefaultWorkflowOrchestrationService;
 import com.suplab.aether.flow.engine.store.JdbcApprovalTaskStore;
+import com.suplab.aether.flow.engine.store.JdbcSlaPolicyStore;
 import com.suplab.aether.flow.engine.store.JdbcWorkflowDefinitionStore;
 import com.suplab.aether.flow.engine.store.JdbcWorkflowInstanceStore;
 import com.suplab.aether.flow.ports.ApprovalGatewayPort;
+import com.suplab.aether.flow.ports.ApprovalNotificationPort;
 import com.suplab.aether.flow.ports.ApprovalTaskStore;
 import com.suplab.aether.flow.ports.SlaEscalationPort;
+import com.suplab.aether.flow.ports.SlaPolicyStore;
 import com.suplab.aether.flow.ports.WorkflowDefinitionStore;
 import com.suplab.aether.flow.ports.WorkflowEnginePort;
 import com.suplab.aether.flow.ports.WorkflowInstanceStore;
@@ -21,11 +25,11 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 /**
  * Spring configuration for Aether Flow API beans.
  *
- * <p>Wires the JDBC stores, the workflow orchestration engine, the Grid DEFER gateway, and the SLA
- * escalation service using constructor injection. All beans are declared here — never via field
- * {@code @Autowired}. The engine adapters are framework-free; only this config knows how to
- * assemble them from the autoconfigured {@link NamedParameterJdbcTemplate} and
- * {@link ObjectMapper}.</p>
+ * <p>Wires the JDBC stores, the workflow orchestration engine, the Grid DEFER gateway, the SLA
+ * policy store, the approval notifier, and the SLA escalation service using constructor injection.
+ * All beans are declared here — never via field {@code @Autowired}. The engine adapters are
+ * framework-free; only this config knows how to assemble them from the autoconfigured
+ * {@link NamedParameterJdbcTemplate} and {@link ObjectMapper}.</p>
  */
 @Configuration
 public class FlowApiConfig {
@@ -56,13 +60,32 @@ public class FlowApiConfig {
     }
 
     /**
+     * Creates the per-tenant SLA policy store (budget + escalation chain).
+     */
+    @Bean
+    public SlaPolicyStore slaPolicyStore(NamedParameterJdbcTemplate jdbc) {
+        return new JdbcSlaPolicyStore(jdbc);
+    }
+
+    /**
+     * Creates the approval notifier. Defaults to the dependency-free logging sink so Flow runs
+     * standalone; webhook/email sinks are adapters behind {@link ApprovalNotificationPort}.
+     */
+    @Bean
+    public ApprovalNotificationPort approvalNotificationPort() {
+        return new LoggingApprovalNotifier();
+    }
+
+    /**
      * Creates the workflow orchestration engine (the process state machine).
      */
     @Bean
     public WorkflowEnginePort workflowEnginePort(WorkflowDefinitionStore definitionStore,
                                                  WorkflowInstanceStore instanceStore,
-                                                 ApprovalTaskStore approvalTaskStore) {
-        return new DefaultWorkflowOrchestrationService(definitionStore, instanceStore, approvalTaskStore);
+                                                 ApprovalTaskStore approvalTaskStore,
+                                                 ApprovalNotificationPort notifier) {
+        return new DefaultWorkflowOrchestrationService(definitionStore, instanceStore, approvalTaskStore,
+                notifier);
     }
 
     /**
@@ -75,15 +98,23 @@ public class FlowApiConfig {
             WorkflowDefinitionStore definitionStore,
             WorkflowInstanceStore instanceStore,
             ApprovalTaskStore approvalTaskStore,
+            ApprovalNotificationPort notifier,
             @Value("${aether.flow.deferral.sla-minutes:60}") int deferralSlaMinutes) {
-        return new DefaultApprovalGateway(definitionStore, instanceStore, approvalTaskStore, deferralSlaMinutes);
+        return new DefaultApprovalGateway(definitionStore, instanceStore, approvalTaskStore, notifier,
+                deferralSlaMinutes);
     }
 
     /**
-     * Creates the SLA escalation sweep service.
+     * Creates the policy-driven SLA escalation sweep service — routes breached tasks up each tenant's
+     * escalation chain and fires escalation notifications.
+     *
+     * @param batchLimit maximum tasks processed per sweep (default 500)
      */
     @Bean
-    public SlaEscalationPort slaEscalationPort(NamedParameterJdbcTemplate jdbc) {
-        return new SlaEscalationService(jdbc);
+    public SlaEscalationPort slaEscalationPort(ApprovalTaskStore approvalTaskStore,
+                                               SlaPolicyStore slaPolicyStore,
+                                               ApprovalNotificationPort notifier,
+                                               @Value("${aether.flow.escalation.batch-limit:500}") int batchLimit) {
+        return new SlaEscalationService(approvalTaskStore, slaPolicyStore, notifier, batchLimit);
     }
 }

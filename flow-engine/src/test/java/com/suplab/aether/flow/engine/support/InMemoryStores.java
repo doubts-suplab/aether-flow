@@ -144,6 +144,19 @@ public final class InMemoryStores {
                     .max(Comparator.comparing(ApprovalTask::createdAt));
         }
 
+        @Override
+        public List<ApprovalTask> findBreachedOpen(java.time.Instant asOf, int limit) {
+            return byId.values().stream()
+                    .filter(t -> t.outcome().isOpen() && t.slaDueAt().isBefore(asOf))
+                    .sorted(Comparator.comparing(ApprovalTask::slaDueAt))
+                    .limit(limit).toList();
+        }
+
+        @Override
+        public long countOpen() {
+            return byId.values().stream().filter(t -> t.outcome().isOpen()).count();
+        }
+
         public List<ApprovalTask> all() {
             return new ArrayList<>(byId.values());
         }

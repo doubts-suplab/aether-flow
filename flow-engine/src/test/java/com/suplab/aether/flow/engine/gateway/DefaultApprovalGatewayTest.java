@@ -21,7 +21,8 @@ class DefaultApprovalGatewayTest {
         definitions = new InMemoryStores.Definitions();
         instances = new InMemoryStores.Instances();
         tasks = new InMemoryStores.Tasks();
-        gateway = new DefaultApprovalGateway(definitions, instances, tasks, 30);
+        gateway = new DefaultApprovalGateway(definitions, instances, tasks,
+                new com.suplab.aether.flow.engine.notification.LoggingApprovalNotifier(), 30);
     }
 
     private static DeferredDecision decision(String correlationId, String role) {
