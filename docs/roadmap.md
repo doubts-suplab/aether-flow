@@ -80,3 +80,19 @@
 | Helm chart `flow-infra/helm/aether-flow/` | ⏳ |
 | HPA (min 2, max 8 replicas) | ✅ (manifest) |
 | Docker build + Helm release workflows | ⏳ |
+
+---
+
+## Ecosystem review — future backlog
+
+> Repo-specific items from the [ecosystem improvement backlog](https://github.com/doubts-suplab/aether/blob/main/docs/roadmaps/ecosystem-improvements.md). Planned, not started.
+> Feasibility: **S** small · **M** moderate · **L** large. License unchanged (AGPL-3.0).
+
+| Item | Feasibility |
+|---|---|
+| Richer step types + non-linear patterns (parallel AND fork/join) *(explicitly deferred — needs a multi-token instance model)* | M–L |
+| Visual/designer UI or BPMN import (if intended) | L |
+| More sophisticated escalation chains + notifications *(partly addressed in Phase 2; webhook/email + business-hours are follow-ups)* | M |
+| Operator visibility + metrics | M |
+| Resilience of long-running instances | M |
+| Tighter contract with Grid's confidence decisions | M |
