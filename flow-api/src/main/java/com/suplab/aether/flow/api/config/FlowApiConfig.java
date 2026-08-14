@@ -3,13 +3,17 @@ package com.suplab.aether.flow.api.config;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.suplab.aether.flow.engine.escalation.SlaEscalationService;
 import com.suplab.aether.flow.engine.gateway.DefaultApprovalGateway;
+import com.suplab.aether.flow.engine.notification.CompositeApprovalNotifier;
 import com.suplab.aether.flow.engine.notification.LoggingApprovalNotifier;
+import com.suplab.aether.flow.engine.notification.WebhookApprovalNotifier;
 import com.suplab.aether.flow.engine.orchestration.DefaultWorkflowOrchestrationService;
 import com.suplab.aether.flow.engine.store.JdbcApprovalTaskStore;
 import com.suplab.aether.flow.engine.store.JdbcSlaPolicyStore;
 import com.suplab.aether.flow.engine.store.JdbcWorkflowDefinitionStore;
 import com.suplab.aether.flow.engine.store.JdbcWorkflowInstanceStore;
+import com.suplab.aether.flow.api.metrics.MicrometerApprovalMetrics;
 import com.suplab.aether.flow.ports.ApprovalGatewayPort;
+import com.suplab.aether.flow.ports.ApprovalMetricsPort;
 import com.suplab.aether.flow.ports.ApprovalNotificationPort;
 import com.suplab.aether.flow.ports.ApprovalTaskStore;
 import com.suplab.aether.flow.ports.SlaEscalationPort;
@@ -17,10 +21,17 @@ import com.suplab.aether.flow.ports.SlaPolicyStore;
 import com.suplab.aether.flow.ports.WorkflowDefinitionStore;
 import com.suplab.aether.flow.ports.WorkflowEnginePort;
 import com.suplab.aether.flow.ports.WorkflowInstanceStore;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import org.springframework.web.client.RestClient;
+
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Spring configuration for Aether Flow API beans.
@@ -68,12 +79,38 @@ public class FlowApiConfig {
     }
 
     /**
-     * Creates the approval notifier. Defaults to the dependency-free logging sink so Flow runs
-     * standalone; webhook/email sinks are adapters behind {@link ApprovalNotificationPort}.
+     * Creates the approval notifier. The logging sink is always on so Flow runs standalone; when
+     * {@code aether.flow.notification.webhook.url} is set, a best-effort {@link WebhookApprovalNotifier}
+     * is fanned in alongside it via a {@link CompositeApprovalNotifier}. Both are adapters behind
+     * {@link ApprovalNotificationPort}; the engine never talks to a transport directly.
+     *
+     * @param webhookUrl     optional HTTP sink for raise/escalation signals (blank → logging only)
+     * @param timeoutSeconds per-request connect/read timeout for the webhook (default 10)
      */
     @Bean
-    public ApprovalNotificationPort approvalNotificationPort() {
-        return new LoggingApprovalNotifier();
+    public ApprovalNotificationPort approvalNotificationPort(
+            @Value("${aether.flow.notification.webhook.url:}") String webhookUrl,
+            @Value("${aether.flow.notification.webhook.timeout-seconds:10}") long timeoutSeconds) {
+        List<ApprovalNotificationPort> sinks = new ArrayList<>();
+        sinks.add(new LoggingApprovalNotifier());
+        if (webhookUrl != null && !webhookUrl.isBlank()) {
+            var requestFactory = new SimpleClientHttpRequestFactory();
+            requestFactory.setConnectTimeout(Duration.ofSeconds(timeoutSeconds));
+            requestFactory.setReadTimeout(Duration.ofSeconds(timeoutSeconds));
+            var restClient = RestClient.builder().requestFactory(requestFactory).build();
+            sinks.add(new WebhookApprovalNotifier(webhookUrl, restClient));
+        }
+        return new CompositeApprovalNotifier(sinks);
+    }
+
+    /**
+     * Creates the operator metrics adapter — Micrometer counters over the approval lifecycle
+     * (raised / approved / rejected / reassigned). Escalation + open-queue metrics live in the
+     * escalation scheduler.
+     */
+    @Bean
+    public ApprovalMetricsPort approvalMetricsPort(MeterRegistry meterRegistry) {
+        return new MicrometerApprovalMetrics(meterRegistry);
     }
 
     /**
@@ -83,9 +120,10 @@ public class FlowApiConfig {
     public WorkflowEnginePort workflowEnginePort(WorkflowDefinitionStore definitionStore,
                                                  WorkflowInstanceStore instanceStore,
                                                  ApprovalTaskStore approvalTaskStore,
-                                                 ApprovalNotificationPort notifier) {
+                                                 ApprovalNotificationPort notifier,
+                                                 ApprovalMetricsPort metrics) {
         return new DefaultWorkflowOrchestrationService(definitionStore, instanceStore, approvalTaskStore,
-                notifier);
+                notifier, metrics);
     }
 
     /**
@@ -99,9 +137,10 @@ public class FlowApiConfig {
             WorkflowInstanceStore instanceStore,
             ApprovalTaskStore approvalTaskStore,
             ApprovalNotificationPort notifier,
+            ApprovalMetricsPort metrics,
             @Value("${aether.flow.deferral.sla-minutes:60}") int deferralSlaMinutes) {
         return new DefaultApprovalGateway(definitionStore, instanceStore, approvalTaskStore, notifier,
-                deferralSlaMinutes);
+                metrics, deferralSlaMinutes);
     }
 
     /**

@@ -5,6 +5,7 @@ import com.suplab.aether.flow.domain.FlowScope;
 import com.suplab.aether.flow.domain.WorkflowDefinition;
 import com.suplab.aether.flow.domain.WorkflowInstance;
 import com.suplab.aether.flow.domain.WorkflowStep;
+import com.suplab.aether.flow.ports.ApprovalMetricsPort;
 import com.suplab.aether.flow.ports.ApprovalNotificationPort;
 import com.suplab.aether.flow.ports.ApprovalTaskStore;
 import com.suplab.aether.flow.ports.WorkflowDefinitionStore;
@@ -39,15 +40,26 @@ public class DefaultWorkflowOrchestrationService implements WorkflowEnginePort {
     private final WorkflowInstanceStore instanceStore;
     private final ApprovalTaskStore approvalTaskStore;
     private final ApprovalNotificationPort notifier;
+    private final ApprovalMetricsPort metrics;
 
+    /** Convenience constructor without a metrics backend — records are no-ops. */
     public DefaultWorkflowOrchestrationService(WorkflowDefinitionStore definitionStore,
                                                WorkflowInstanceStore instanceStore,
                                                ApprovalTaskStore approvalTaskStore,
                                                ApprovalNotificationPort notifier) {
+        this(definitionStore, instanceStore, approvalTaskStore, notifier, ApprovalMetricsPort.NO_OP);
+    }
+
+    public DefaultWorkflowOrchestrationService(WorkflowDefinitionStore definitionStore,
+                                               WorkflowInstanceStore instanceStore,
+                                               ApprovalTaskStore approvalTaskStore,
+                                               ApprovalNotificationPort notifier,
+                                               ApprovalMetricsPort metrics) {
         this.definitionStore = definitionStore;
         this.instanceStore = instanceStore;
         this.approvalTaskStore = approvalTaskStore;
         this.notifier = notifier;
+        this.metrics = metrics;
     }
 
     @Override
@@ -65,6 +77,7 @@ public class DefaultWorkflowOrchestrationService implements WorkflowEnginePort {
     public WorkflowInstance approve(String tenantId, UUID taskId, String decidedBy, String comment) {
         var task = requireTask(tenantId, taskId);
         approvalTaskStore.save(task.approve(decidedBy, comment));
+        metrics.recordApproved(task);
         var instance = requireInstance(tenantId, task.instanceId());
         // Resolve the definition the instance is pinned to — never the (possibly newer) active one —
         // so a version published while this instance was parked cannot change how it resumes.
@@ -84,6 +97,7 @@ public class DefaultWorkflowOrchestrationService implements WorkflowEnginePort {
     public WorkflowInstance reject(String tenantId, UUID taskId, String decidedBy, String comment) {
         var task = requireTask(tenantId, taskId);
         approvalTaskStore.save(task.reject(decidedBy, comment));
+        metrics.recordRejected(task);
         var instance = requireInstance(tenantId, task.instanceId());
         var definition = requireDefinition(instance.scope(), instance.definitionVersion());
         var approvalStep = requireStep(definition, instance.currentStepKey());
@@ -133,6 +147,7 @@ public class DefaultWorkflowOrchestrationService implements WorkflowEnginePort {
                 var task = ApprovalTask.raise(parked, step, step.assignedRole());
                 approvalTaskStore.save(task);
                 notifyRaised(task);
+                metrics.recordRaised(task);
                 log.info("Parked instanceId={} at approval step={} taskId={} slaDueAt={}",
                         parked.id(), step.key(), task.id(), task.slaDueAt());
                 return parked;

@@ -5,7 +5,7 @@
 
 ---
 
-**Active Phase:** Phase 2 — Human Approval & SLA Governance 🔄 (core complete: SLA policy + chain escalation + reassignment + notifications; business-hours + webhook/email follow-up)
+**Active Phase:** Phase 2 — Human Approval & SLA Governance 🔄 (core complete: SLA policy + chain escalation + reassignment + notifications incl. best-effort webhook sink + operator lifecycle metrics; business-hours + email follow-up)
 
 | Phase | Name | Status | Sessions |
 |---|---|---|---|
@@ -62,7 +62,69 @@ flow-engine test + flow-infra copies). The `approval_tasks` UPSERT now also pers
 
 ### Remaining Phase 2 (follow-up)
 - **Business-hours calendars** in `SlaPolicy` (SLA clock pauses outside working hours).
-- **Webhook / email notification sinks** behind `ApprovalNotificationPort`.
+- **Email notification sink** behind `ApprovalNotificationPort`.
+
+---
+
+## Phase 2 — Human Approval & SLA Governance 🔄 (session 3 — operator metrics)
+
+**Commit:** `feat(flow): operator metrics over the approval lifecycle (Micrometer)`
+
+The escalation sweep already emitted an escalated counter and an open-queue gauge. This session
+completes the operator metric set with counters over the human-driven lifecycle, wired through a
+framework-free port so the engine never depends on Micrometer.
+
+### What was done
+
+**Approval-lifecycle counters:**
+- `ApprovalMetricsPort` (flow-domain) — a framework-free port with `recordRaised/Approved/Rejected/
+  Reassigned` and a `NO_OP` default, mirroring the `ApprovalNotificationPort` seam.
+- `MicrometerApprovalMetrics` (flow-api) — registers and increments four counters:
+  `aether.flow.approvals.{raised,approved,rejected,reassigned}`. Registered at startup so a dashboard
+  sees them from zero.
+- Wired at the transitions where they happen: `DefaultWorkflowOrchestrationService` (raised on park,
+  approved/rejected on decision), `DefaultApprovalGateway` (raised on Grid deferral intake),
+  `ApprovalTaskController` (reassigned on delegation). Engine services keep a convenience constructor
+  defaulting to `NO_OP` so unit tests and standalone runs need no registry.
+- Escalation + open-queue metrics are unchanged (still `aether.flow.escalation.escalated` +
+  `aether.flow.approvals.open` in the sweep) — the port deliberately does not duplicate them.
+
+**Tests — 113 unit tests green (was 110):**
+- `MicrometerApprovalMetricsTest` (2): per-transition increments over a `SimpleMeterRegistry`,
+  counters present from startup.
+- Engine `lifecycleTransitionsAreMetered` (raised/approved/rejected counts) + a controller assertion
+  that reassignment is metered. No new migration — metrics are a read-side projection of existing state.
+
+---
+
+## Phase 2 — Human Approval & SLA Governance 🔄 (session 2 — webhook notification sink)
+
+**Commit:** `feat(flow): webhook approval notification sink (best-effort, config-gated)`
+
+The notification seam already had a logging default and an `ApprovalNotificationPort` abstraction.
+This session adds the first real transport behind it — a webhook — without the engine ever talking
+to HTTP directly.
+
+### What was done
+
+**Webhook sink + fan-out:**
+- `WebhookApprovalNotifier` (flow-engine) — POSTs a **bounded JSON envelope** (event type, task id,
+  tenant, instance/workflow/step keys, role, outcome, escalation level, SLA deadline — never a
+  decision, comment, or Grid/PII content) to a configured URL via Spring `RestClient`. Delivery is
+  **best-effort**: any transport failure is logged and swallowed, so a dead endpoint never breaks
+  task raising or the escalation sweep.
+- `CompositeApprovalNotifier` (flow-engine) — fans each signal out to every configured sink, each
+  invoked independently and best-effort so one throwing sink never suppresses the others.
+- `FlowApiConfig.approvalNotificationPort` now composes the always-on logging sink with a
+  `WebhookApprovalNotifier` **only when** `aether.flow.notification.webhook.url` is set (with a
+  configurable `…webhook.timeout-seconds`, default 10). Flow still runs standalone on logging alone.
+- `flow-engine` gains a `spring-web` dependency for `RestClient` (mirrors memory-engine's peer client).
+
+**Tests — 110 unit tests green (was 104):**
+- `WebhookApprovalNotifierTest` (3): blank-URL rejection, unreachable sink swallowed on raise + escalate.
+- `CompositeApprovalNotifierTest` (3): fan-out to every sink, throwing sink does not suppress others,
+  null delegate list is a no-op.
+- No new migration — notification is a side-channel over existing state.
 
 ---
 

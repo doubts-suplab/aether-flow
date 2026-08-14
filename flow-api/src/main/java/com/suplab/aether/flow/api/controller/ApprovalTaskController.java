@@ -1,6 +1,7 @@
 package com.suplab.aether.flow.api.controller;
 
 import com.suplab.aether.flow.domain.ApprovalTask;
+import com.suplab.aether.flow.ports.ApprovalMetricsPort;
 import com.suplab.aether.flow.ports.ApprovalTaskStore;
 import com.suplab.aether.flow.ports.WorkflowEnginePort;
 import org.slf4j.Logger;
@@ -34,10 +35,13 @@ public class ApprovalTaskController {
 
     private final ApprovalTaskStore approvalTaskStore;
     private final WorkflowEnginePort engine;
+    private final ApprovalMetricsPort metrics;
 
-    public ApprovalTaskController(ApprovalTaskStore approvalTaskStore, WorkflowEnginePort engine) {
+    public ApprovalTaskController(ApprovalTaskStore approvalTaskStore, WorkflowEnginePort engine,
+                                  ApprovalMetricsPort metrics) {
         this.approvalTaskStore = approvalTaskStore;
         this.engine = engine;
+        this.metrics = metrics;
     }
 
     /** Request body for a decision. */
@@ -115,6 +119,7 @@ public class ApprovalTaskController {
         try {
             var reassigned = existing.get().reassign(request.assignedRole());
             approvalTaskStore.save(reassigned);
+            metrics.recordReassigned(reassigned);
             log.info("Reassigned taskId={} tenantId={} -> role={}", taskId, tenantId, reassigned.assignedRole());
             return ResponseEntity.ok(toView(reassigned));
         } catch (IllegalStateException e) {

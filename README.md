@@ -99,4 +99,6 @@ Aether Flow owns the **Workflows** capability exclusively. Memory stays in Core/
 | `FLOW_DEFERRAL_SLA_MINUTES` | `60` | SLA budget for a Grid deferral's approval task |
 | `FLOW_ESCALATION_ENABLED` | `true` | Toggle the scheduled SLA escalation sweep |
 | `FLOW_ESCALATION_CRON` | `0 */5 * * * *` | Escalation sweep schedule |
+| `FLOW_NOTIFICATION_WEBHOOK_URL` | *(unset)* | HTTP sink for approval raise/escalation signals — when set, a best-effort webhook notifier is fanned in alongside the logging sink (blank → logging only) |
+| `FLOW_NOTIFICATION_WEBHOOK_TIMEOUT_SECONDS` | `10` | Per-request connect/read timeout for the webhook sink |
 | `SERVER_PORT` | `8085` | HTTP port |

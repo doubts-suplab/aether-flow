@@ -29,3 +29,7 @@ aether:
     escalation:
       enabled: ${FLOW_ESCALATION_ENABLED:true}
       cron: ${FLOW_ESCALATION_CRON:0 */5 * * * *}
+    notification:
+      webhook:
+        url: ${FLOW_NOTIFICATION_WEBHOOK_URL:}
+        timeout-seconds: ${FLOW_NOTIFICATION_WEBHOOK_TIMEOUT_SECONDS:10}
