@@ -76,7 +76,7 @@ DeferredDecision = (correlationId, tenantId, agentId, summary, confidence, reque
 | `WorkflowInstanceStore` | `JdbcWorkflowInstanceStore` | Persist every instance transition; the durable state |
 | `ApprovalTaskStore` | `JdbcApprovalTaskStore` | Persist the human review queue; open-task lookups; breached-task batch + open count for the sweep |
 | `SlaPolicyStore` | `JdbcSlaPolicyStore` | Per-tenant SLA budget + escalation chain (upsert by tenant) |
-| `ApprovalNotificationPort` | `LoggingApprovalNotifier` | Reviewer notifications on task raise + escalation (logging default; webhook/email are adapters behind the port) |
+| `ApprovalNotificationPort` | `LoggingApprovalNotifier`, `WebhookApprovalNotifier`, `CompositeApprovalNotifier` | Reviewer notifications on task raise + escalation. Logging default is always on; a config-gated best-effort webhook sink is fanned in via the composite when `aether.flow.notification.webhook.url` is set (email still an adapter behind the port) |
 | `WorkflowEnginePort` | `DefaultWorkflowOrchestrationService` | Start / advance instances; resume on approve/reject; **cancel** (stops the instance, withdraws its open task); notifies on raise |
 | `ApprovalGatewayPort` | `DefaultApprovalGateway` | Grid DEFER → parked human-approval workflow; notifies on raise |
 | `SlaEscalationPort` | `SlaEscalationService` | Policy-driven sweep routing breached tasks up the tenant's escalation chain (reassign + fresh budget per level), or flagging ESCALATED when no chain |
