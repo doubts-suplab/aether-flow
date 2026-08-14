@@ -5,7 +5,7 @@
 
 ---
 
-**Active Phase:** Phase 2 — Human Approval & SLA Governance 🔄 (core complete: SLA policy + chain escalation + reassignment + notifications incl. best-effort webhook sink; business-hours + email follow-up)
+**Active Phase:** Phase 2 — Human Approval & SLA Governance 🔄 (core complete: SLA policy + chain escalation + reassignment + notifications incl. best-effort webhook sink + operator lifecycle metrics; business-hours + email follow-up)
 
 | Phase | Name | Status | Sessions |
 |---|---|---|---|
@@ -63,6 +63,37 @@ flow-engine test + flow-infra copies). The `approval_tasks` UPSERT now also pers
 ### Remaining Phase 2 (follow-up)
 - **Business-hours calendars** in `SlaPolicy` (SLA clock pauses outside working hours).
 - **Email notification sink** behind `ApprovalNotificationPort`.
+
+---
+
+## Phase 2 — Human Approval & SLA Governance 🔄 (session 3 — operator metrics)
+
+**Commit:** `feat(flow): operator metrics over the approval lifecycle (Micrometer)`
+
+The escalation sweep already emitted an escalated counter and an open-queue gauge. This session
+completes the operator metric set with counters over the human-driven lifecycle, wired through a
+framework-free port so the engine never depends on Micrometer.
+
+### What was done
+
+**Approval-lifecycle counters:**
+- `ApprovalMetricsPort` (flow-domain) — a framework-free port with `recordRaised/Approved/Rejected/
+  Reassigned` and a `NO_OP` default, mirroring the `ApprovalNotificationPort` seam.
+- `MicrometerApprovalMetrics` (flow-api) — registers and increments four counters:
+  `aether.flow.approvals.{raised,approved,rejected,reassigned}`. Registered at startup so a dashboard
+  sees them from zero.
+- Wired at the transitions where they happen: `DefaultWorkflowOrchestrationService` (raised on park,
+  approved/rejected on decision), `DefaultApprovalGateway` (raised on Grid deferral intake),
+  `ApprovalTaskController` (reassigned on delegation). Engine services keep a convenience constructor
+  defaulting to `NO_OP` so unit tests and standalone runs need no registry.
+- Escalation + open-queue metrics are unchanged (still `aether.flow.escalation.escalated` +
+  `aether.flow.approvals.open` in the sweep) — the port deliberately does not duplicate them.
+
+**Tests — 113 unit tests green (was 110):**
+- `MicrometerApprovalMetricsTest` (2): per-transition increments over a `SimpleMeterRegistry`,
+  counters present from startup.
+- Engine `lifecycleTransitionsAreMetered` (raised/approved/rejected counts) + a controller assertion
+  that reassignment is metered. No new migration — metrics are a read-side projection of existing state.
 
 ---
 

@@ -7,6 +7,7 @@ import com.suplab.aether.flow.domain.WorkflowDefinition;
 import com.suplab.aether.flow.domain.WorkflowInstance;
 import com.suplab.aether.flow.domain.WorkflowStep;
 import com.suplab.aether.flow.ports.ApprovalGatewayPort;
+import com.suplab.aether.flow.ports.ApprovalMetricsPort;
 import com.suplab.aether.flow.ports.ApprovalNotificationPort;
 import com.suplab.aether.flow.ports.ApprovalTaskStore;
 import com.suplab.aether.flow.ports.WorkflowDefinitionStore;
@@ -45,7 +46,18 @@ public class DefaultApprovalGateway implements ApprovalGatewayPort {
     private final WorkflowInstanceStore instanceStore;
     private final ApprovalTaskStore approvalTaskStore;
     private final ApprovalNotificationPort notifier;
+    private final ApprovalMetricsPort metrics;
     private final int deferralSlaMinutes;
+
+    /** Convenience constructor without a metrics backend — records are no-ops. */
+    public DefaultApprovalGateway(WorkflowDefinitionStore definitionStore,
+                                  WorkflowInstanceStore instanceStore,
+                                  ApprovalTaskStore approvalTaskStore,
+                                  ApprovalNotificationPort notifier,
+                                  int deferralSlaMinutes) {
+        this(definitionStore, instanceStore, approvalTaskStore, notifier, ApprovalMetricsPort.NO_OP,
+                deferralSlaMinutes);
+    }
 
     /**
      * @param deferralSlaMinutes SLA budget for a deferral's approval task before it is escalated
@@ -54,11 +66,13 @@ public class DefaultApprovalGateway implements ApprovalGatewayPort {
                                   WorkflowInstanceStore instanceStore,
                                   ApprovalTaskStore approvalTaskStore,
                                   ApprovalNotificationPort notifier,
+                                  ApprovalMetricsPort metrics,
                                   int deferralSlaMinutes) {
         this.definitionStore = definitionStore;
         this.instanceStore = instanceStore;
         this.approvalTaskStore = approvalTaskStore;
         this.notifier = notifier;
+        this.metrics = metrics;
         this.deferralSlaMinutes = deferralSlaMinutes;
     }
 
@@ -74,6 +88,7 @@ public class DefaultApprovalGateway implements ApprovalGatewayPort {
         var task = ApprovalTask.raise(instance, reviewStep, decision.requestedRole());
         approvalTaskStore.save(task);
         notifyRaised(task);
+        metrics.recordRaised(task);
 
         log.info("Accepted Grid deferral correlationId={} tenantId={} confidence={} -> instanceId={} taskId={} role={}",
                 decision.correlationId(), decision.tenantId(), decision.confidence(), instance.id(),

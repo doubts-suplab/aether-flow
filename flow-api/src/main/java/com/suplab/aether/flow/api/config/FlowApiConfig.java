@@ -11,7 +11,9 @@ import com.suplab.aether.flow.engine.store.JdbcApprovalTaskStore;
 import com.suplab.aether.flow.engine.store.JdbcSlaPolicyStore;
 import com.suplab.aether.flow.engine.store.JdbcWorkflowDefinitionStore;
 import com.suplab.aether.flow.engine.store.JdbcWorkflowInstanceStore;
+import com.suplab.aether.flow.api.metrics.MicrometerApprovalMetrics;
 import com.suplab.aether.flow.ports.ApprovalGatewayPort;
+import com.suplab.aether.flow.ports.ApprovalMetricsPort;
 import com.suplab.aether.flow.ports.ApprovalNotificationPort;
 import com.suplab.aether.flow.ports.ApprovalTaskStore;
 import com.suplab.aether.flow.ports.SlaEscalationPort;
@@ -19,6 +21,7 @@ import com.suplab.aether.flow.ports.SlaPolicyStore;
 import com.suplab.aether.flow.ports.WorkflowDefinitionStore;
 import com.suplab.aether.flow.ports.WorkflowEnginePort;
 import com.suplab.aether.flow.ports.WorkflowInstanceStore;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -101,15 +104,26 @@ public class FlowApiConfig {
     }
 
     /**
+     * Creates the operator metrics adapter — Micrometer counters over the approval lifecycle
+     * (raised / approved / rejected / reassigned). Escalation + open-queue metrics live in the
+     * escalation scheduler.
+     */
+    @Bean
+    public ApprovalMetricsPort approvalMetricsPort(MeterRegistry meterRegistry) {
+        return new MicrometerApprovalMetrics(meterRegistry);
+    }
+
+    /**
      * Creates the workflow orchestration engine (the process state machine).
      */
     @Bean
     public WorkflowEnginePort workflowEnginePort(WorkflowDefinitionStore definitionStore,
                                                  WorkflowInstanceStore instanceStore,
                                                  ApprovalTaskStore approvalTaskStore,
-                                                 ApprovalNotificationPort notifier) {
+                                                 ApprovalNotificationPort notifier,
+                                                 ApprovalMetricsPort metrics) {
         return new DefaultWorkflowOrchestrationService(definitionStore, instanceStore, approvalTaskStore,
-                notifier);
+                notifier, metrics);
     }
 
     /**
@@ -123,9 +137,10 @@ public class FlowApiConfig {
             WorkflowInstanceStore instanceStore,
             ApprovalTaskStore approvalTaskStore,
             ApprovalNotificationPort notifier,
+            ApprovalMetricsPort metrics,
             @Value("${aether.flow.deferral.sla-minutes:60}") int deferralSlaMinutes) {
         return new DefaultApprovalGateway(definitionStore, instanceStore, approvalTaskStore, notifier,
-                deferralSlaMinutes);
+                metrics, deferralSlaMinutes);
     }
 
     /**

@@ -1,12 +1,14 @@
 package com.suplab.aether.flow.engine.orchestration;
 
 import com.suplab.aether.flow.domain.ApprovalOutcome;
+import com.suplab.aether.flow.domain.ApprovalTask;
 import com.suplab.aether.flow.domain.FlowScope;
 import com.suplab.aether.flow.domain.WorkflowDefinition;
 import com.suplab.aether.flow.domain.WorkflowInstance;
 import com.suplab.aether.flow.domain.WorkflowStatus;
 import com.suplab.aether.flow.domain.WorkflowStep;
 import com.suplab.aether.flow.engine.support.InMemoryStores;
+import com.suplab.aether.flow.ports.ApprovalMetricsPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -110,6 +112,41 @@ class DefaultWorkflowOrchestrationServiceTest {
         assertThat(rejected.status()).isEqualTo(WorkflowStatus.REJECTED);
         assertThat(tasks.findById("acme", task.id()).orElseThrow().outcome())
                 .isEqualTo(ApprovalOutcome.REJECTED);
+    }
+
+    @Test
+    void lifecycleTransitionsAreMetered() {
+        var metrics = new RecordingMetrics();
+        var metered = new DefaultWorkflowOrchestrationService(definitions, instances, tasks,
+                new com.suplab.aether.flow.engine.notification.LoggingApprovalNotifier(), metrics);
+        definitions.save(approvalWorkflow());
+
+        metered.start(SCOPE, "INV-1001");        // parks at review → raised
+        var task = tasks.all().get(0);
+        metered.approve("acme", task.id(), "alice", "ok"); // approved
+
+        assertThat(metrics.raised).isEqualTo(1);
+        assertThat(metrics.approved).isEqualTo(1);
+        assertThat(metrics.rejected).isZero();
+
+        // a fresh instance that gets rejected bumps only the rejected counter
+        var secondInstance = metered.start(SCOPE, "INV-1002");
+        var second = tasks.findOpenByInstance("acme", secondInstance.id()).orElseThrow();
+        metered.reject("acme", second.id(), "bob", "no");
+
+        assertThat(metrics.raised).isEqualTo(2);
+        assertThat(metrics.approved).isEqualTo(1);
+        assertThat(metrics.rejected).isEqualTo(1);
+    }
+
+    private static final class RecordingMetrics implements ApprovalMetricsPort {
+        int raised;
+        int approved;
+        int rejected;
+        @Override public void recordRaised(ApprovalTask task) { raised++; }
+        @Override public void recordApproved(ApprovalTask task) { approved++; }
+        @Override public void recordRejected(ApprovalTask task) { rejected++; }
+        @Override public void recordReassigned(ApprovalTask task) { }
     }
 
     @Test

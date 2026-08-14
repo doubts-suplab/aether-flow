@@ -77,8 +77,9 @@ DeferredDecision = (correlationId, tenantId, agentId, summary, confidence, reque
 | `ApprovalTaskStore` | `JdbcApprovalTaskStore` | Persist the human review queue; open-task lookups; breached-task batch + open count for the sweep |
 | `SlaPolicyStore` | `JdbcSlaPolicyStore` | Per-tenant SLA budget + escalation chain (upsert by tenant) |
 | `ApprovalNotificationPort` | `LoggingApprovalNotifier`, `WebhookApprovalNotifier`, `CompositeApprovalNotifier` | Reviewer notifications on task raise + escalation. Logging default is always on; a config-gated best-effort webhook sink is fanned in via the composite when `aether.flow.notification.webhook.url` is set (email still an adapter behind the port) |
-| `WorkflowEnginePort` | `DefaultWorkflowOrchestrationService` | Start / advance instances; resume on approve/reject; **cancel** (stops the instance, withdraws its open task); notifies on raise |
-| `ApprovalGatewayPort` | `DefaultApprovalGateway` | Grid DEFER → parked human-approval workflow; notifies on raise |
+| `ApprovalMetricsPort` | `MicrometerApprovalMetrics` (`NO_OP` default) | Operator counters over the approval lifecycle — `aether.flow.approvals.{raised,approved,rejected,reassigned}`. Framework-free port; the Micrometer adapter lives in the API module so the engine stays library-agnostic |
+| `WorkflowEnginePort` | `DefaultWorkflowOrchestrationService` | Start / advance instances; resume on approve/reject; **cancel** (stops the instance, withdraws its open task); notifies + meters on raise/approve/reject |
+| `ApprovalGatewayPort` | `DefaultApprovalGateway` | Grid DEFER → parked human-approval workflow; notifies + meters on raise |
 | `SlaEscalationPort` | `SlaEscalationService` | Policy-driven sweep routing breached tasks up the tenant's escalation chain (reassign + fresh budget per level), or flagging ESCALATED when no chain |
 
 ---
@@ -110,6 +111,8 @@ Flow owns **no** vector store or embedding — the step graph is plain JSONB, ev
 2. `POST …/approvals/{taskId}/approve` → `engine.approve` records the decision, moves the parked instance to the gate's successor, and drives onward to the next park or completion.
 3. `POST …/approvals/{taskId}/reject` → `engine.reject`: if the approval step declares a `reworkStepKey`, the instance **branches** to that rework step and drives on (a rework loop — e.g. `review → fix → review`), making the graph non-linear; otherwise the instance stops in `REJECTED`. The `MAX_TRANSITIONS` guard bounds any loop.
 4. `POST …/approvals/{taskId}/reassign` → delegates an open task to another role (`ApprovalTask.reassign`); the task stays open in the new role's queue, its outcome, deadline, and escalation level unchanged. Raising a task fires `ApprovalNotificationPort.notifyRaised`.
+
+> **Operator metrics.** Each lifecycle transition also increments a Micrometer counter through `ApprovalMetricsPort` — `aether.flow.approvals.raised` (on park / deferral intake), `.approved`, `.rejected` (on decision), and `.reassigned` (on delegation). With the sweep's `aether.flow.escalation.escalated` counter and `aether.flow.approvals.open` gauge, these give an operator the full picture of review-queue throughput and depth. The port is framework-free; only the API-module adapter touches Micrometer.
 
 ### 5.3 Cancellation (operator withdrawal)
 1. `POST …/instances/{id}/cancel` → `WorkflowEnginePort.cancel` loads the instance; a terminal instance is rejected (409).
