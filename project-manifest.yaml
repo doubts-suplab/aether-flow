@@ -1,0 +1,57 @@
+# EEIK Project Manifest — Aether Flow
+# Canonical manifest (schema_version 1.0) — validates against eeik/schemas/manifest.schema.json.
+# Replaces the pre-canonical aether.manifest.yaml. Adopted at the manifest level; engine-driven
+# activate/lock/verify against an external repo is an eeik follow-up.
+# Note: Flow deliberately owns no vector store, embedding model, or LLM — orchestration is not a
+# semantic capability — so there is no `ai` block.
+
+schema_version: "1.0"
+
+project:
+  name: aether-flow
+  description: >
+    Workflow platform — BPMN-style multi-step human-AI process orchestration, a persisted state
+    machine, human approval gates with SLA escalation, and Grid DEFER intake.
+  owner: suplab
+  domain: generic
+  project_type: enterprise-platform
+
+technology:
+  backend:
+    language: java
+    version: 21
+    framework: spring-boot
+  database:
+    type: postgresql
+    migration_tool: flyway
+    orm: jdbctemplate
+  containerisation:
+    runtime: docker
+
+architecture:
+  style: modular-monolith
+  patterns:
+    - ddd
+  api_style: rest
+
+cloud:
+  provider: local-first
+  infra_as_code: none
+  multi_account: false
+  finops: false
+
+governance:
+  profile: enterprise
+  reviews_required:
+    - architecture-review
+    - security-review
+  compliance_frameworks:
+    - gdpr
+  adr_required: true
+  coverage_threshold: 80
+
+delivery:
+  model: single-team
+  methodology: incremental
+  sprint_length_weeks: 2
+  cicd_platform: github-actions
