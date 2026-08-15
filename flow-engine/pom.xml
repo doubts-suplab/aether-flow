@@ -37,6 +37,11 @@
       <groupId>org.springframework</groupId>
       <artifactId>spring-web</artifactId>
     </dependency>
+    <!-- JavaMailSender for the best-effort email notification sink -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-mail</artifactId>
+    </dependency>
     <!-- Integration test dependencies -->
     <dependency>
       <groupId>org.testcontainers</groupId>

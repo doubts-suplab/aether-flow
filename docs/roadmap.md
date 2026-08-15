@@ -53,7 +53,7 @@
 | Per-tenant SLA policy — business-hours calendars | ⏳ (follow-up) |
 | Notifications on task raise / escalation — `ApprovalNotificationPort` (logging default) | ✅ |
 | Notification sink — **webhook** adapter (`WebhookApprovalNotifier`, config-gated, best-effort) fanned in via `CompositeApprovalNotifier` | ✅ |
-| Notification sink — email adapter behind the port | ⏳ (follow-up) |
+| Notification sink — **email** adapter (`EmailApprovalNotifier` over `JavaMailSender`, config-gated, best-effort) fanned in via `CompositeApprovalNotifier` | ✅ |
 | Delegation and reassignment of approval tasks (`POST .../approvals/{id}/reassign`) | ✅ |
 | Operator metrics — Micrometer counters for the approval lifecycle (`aether.flow.approvals.{raised,approved,rejected,reassigned}`) alongside the existing escalation counter + open-queue gauge | ✅ |
 
@@ -94,7 +94,7 @@
 |---|---|
 | Richer step types + non-linear patterns (parallel AND fork/join) *(explicitly deferred — needs a multi-token instance model)* | M–L |
 | Visual/designer UI or BPMN import (if intended) | L |
-| More sophisticated escalation chains + notifications *(partly addressed in Phase 2; webhook sink delivered, email + business-hours are follow-ups)* | M |
+| More sophisticated escalation chains + notifications *(addressed in Phase 2; webhook + email sinks delivered, business-hours calendars remain a follow-up)* | M |
 | Operator visibility + metrics *(approval-lifecycle counters + escalation/open metrics delivered in Phase 2; richer dashboards remain)* | M |
 | Resilience of long-running instances | M |
 | Tighter contract with Grid's confidence decisions | M |

@@ -5,7 +5,7 @@
 
 ---
 
-**Active Phase:** Phase 2 — Human Approval & SLA Governance 🔄 (core complete: SLA policy + chain escalation + reassignment + notifications incl. best-effort webhook sink + operator lifecycle metrics; business-hours + email follow-up)
+**Active Phase:** Phase 2 — Human Approval & SLA Governance 🔄 (core complete: SLA policy + chain escalation + reassignment + notifications incl. best-effort webhook + email sinks + operator lifecycle metrics; business-hours follow-up)
 
 | Phase | Name | Status | Sessions |
 |---|---|---|---|
@@ -62,7 +62,37 @@ flow-engine test + flow-infra copies). The `approval_tasks` UPSERT now also pers
 
 ### Remaining Phase 2 (follow-up)
 - **Business-hours calendars** in `SlaPolicy` (SLA clock pauses outside working hours).
-- **Email notification sink** behind `ApprovalNotificationPort`.
+
+---
+
+## Phase 2 — Human Approval & SLA Governance 🔄 (session 4 — email notification sink)
+
+**Commit:** `feat(flow): email approval notification sink (best-effort, config-gated)`
+
+The notification seam already fanned a webhook out behind `ApprovalNotificationPort`. This session
+adds the second real transport — email — completing the notification follow-up, again without the
+engine ever touching a mail API directly.
+
+### What was done
+
+**Email sink:**
+- `EmailApprovalNotifier` (flow-engine) — sends a **bounded plain-text message** (event type, task id,
+  tenant, instance/workflow/step keys, role, outcome, escalation level, SLA deadline — never a
+  decision, comment, or Grid/PII content) via Spring's `MailSender`/`JavaMailSender`. Delivery is
+  **best-effort**: any `MailException` is logged and swallowed, so an SMTP outage never breaks task
+  raising or the escalation sweep — mirroring the webhook sink.
+- `FlowApiConfig.approvalNotificationPort` now also fans an `EmailApprovalNotifier` into the
+  `CompositeApprovalNotifier` **only when** `aether.flow.notification.email.to` is set **and** a
+  `MailSender` bean is present (injected via `ObjectProvider`, so Flow still boots with no mail
+  configured). Sender defaults to `aether-flow@localhost` (`…email.from`). SMTP host/port/credentials
+  come from `spring.mail.*` (environment-sourced; no secrets in source).
+- `flow-engine` gains a `spring-boot-starter-mail` dependency for `JavaMailSender`.
+
+**Tests — 118 unit tests green (was 113):**
+- `EmailApprovalNotifierTest` (5): blank recipient/sender/null-sender rejection, bounded message on
+  raise (from/to/subject/body assertions), escalated event subject, and an SMTP failure swallowed on
+  both raise + escalate (capturing + failing `MailSender` fakes — no live SMTP).
+- No new migration — notification is a side-channel over existing state.
 
 ---
 

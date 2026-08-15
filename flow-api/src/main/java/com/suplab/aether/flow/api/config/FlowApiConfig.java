@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.suplab.aether.flow.engine.escalation.SlaEscalationService;
 import com.suplab.aether.flow.engine.gateway.DefaultApprovalGateway;
 import com.suplab.aether.flow.engine.notification.CompositeApprovalNotifier;
+import com.suplab.aether.flow.engine.notification.EmailApprovalNotifier;
 import com.suplab.aether.flow.engine.notification.LoggingApprovalNotifier;
 import com.suplab.aether.flow.engine.notification.WebhookApprovalNotifier;
 import com.suplab.aether.flow.engine.orchestration.DefaultWorkflowOrchestrationService;
@@ -22,11 +23,13 @@ import com.suplab.aether.flow.ports.WorkflowDefinitionStore;
 import com.suplab.aether.flow.ports.WorkflowEnginePort;
 import com.suplab.aether.flow.ports.WorkflowInstanceStore;
 import io.micrometer.core.instrument.MeterRegistry;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import org.springframework.mail.MailSender;
 import org.springframework.web.client.RestClient;
 
 import java.time.Duration;
@@ -81,16 +84,25 @@ public class FlowApiConfig {
     /**
      * Creates the approval notifier. The logging sink is always on so Flow runs standalone; when
      * {@code aether.flow.notification.webhook.url} is set, a best-effort {@link WebhookApprovalNotifier}
-     * is fanned in alongside it via a {@link CompositeApprovalNotifier}. Both are adapters behind
-     * {@link ApprovalNotificationPort}; the engine never talks to a transport directly.
+     * is fanned in alongside it, and when {@code aether.flow.notification.email.to} is set (and a
+     * {@link MailSender} is configured via {@code spring.mail.*}), a best-effort
+     * {@link EmailApprovalNotifier} is fanned in too — all via a {@link CompositeApprovalNotifier}. Each
+     * is an adapter behind {@link ApprovalNotificationPort}; the engine never talks to a transport
+     * directly.
      *
-     * @param webhookUrl     optional HTTP sink for raise/escalation signals (blank → logging only)
+     * @param webhookUrl     optional HTTP sink for raise/escalation signals (blank → no webhook)
      * @param timeoutSeconds per-request connect/read timeout for the webhook (default 10)
+     * @param emailTo        optional recipient for raise/escalation emails (blank → no email)
+     * @param emailFrom      sender address for notification emails
+     * @param mailSender     autoconfigured mail sender (absent → email sink skipped even if a recipient is set)
      */
     @Bean
     public ApprovalNotificationPort approvalNotificationPort(
             @Value("${aether.flow.notification.webhook.url:}") String webhookUrl,
-            @Value("${aether.flow.notification.webhook.timeout-seconds:10}") long timeoutSeconds) {
+            @Value("${aether.flow.notification.webhook.timeout-seconds:10}") long timeoutSeconds,
+            @Value("${aether.flow.notification.email.to:}") String emailTo,
+            @Value("${aether.flow.notification.email.from:aether-flow@localhost}") String emailFrom,
+            ObjectProvider<MailSender> mailSender) {
         List<ApprovalNotificationPort> sinks = new ArrayList<>();
         sinks.add(new LoggingApprovalNotifier());
         if (webhookUrl != null && !webhookUrl.isBlank()) {
@@ -99,6 +111,12 @@ public class FlowApiConfig {
             requestFactory.setReadTimeout(Duration.ofSeconds(timeoutSeconds));
             var restClient = RestClient.builder().requestFactory(requestFactory).build();
             sinks.add(new WebhookApprovalNotifier(webhookUrl, restClient));
+        }
+        if (emailTo != null && !emailTo.isBlank()) {
+            var sender = mailSender.getIfAvailable();
+            if (sender != null) {
+                sinks.add(new EmailApprovalNotifier(sender, emailFrom, emailTo));
+            }
         }
         return new CompositeApprovalNotifier(sinks);
     }

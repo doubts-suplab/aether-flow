@@ -101,4 +101,12 @@ Aether Flow owns the **Workflows** capability exclusively. Memory stays in Core/
 | `FLOW_ESCALATION_CRON` | `0 */5 * * * *` | Escalation sweep schedule |
 | `FLOW_NOTIFICATION_WEBHOOK_URL` | *(unset)* | HTTP sink for approval raise/escalation signals — when set, a best-effort webhook notifier is fanned in alongside the logging sink (blank → logging only) |
 | `FLOW_NOTIFICATION_WEBHOOK_TIMEOUT_SECONDS` | `10` | Per-request connect/read timeout for the webhook sink |
+| `FLOW_NOTIFICATION_EMAIL_TO` | *(unset)* | Recipient for approval raise/escalation emails — when set (and SMTP is configured), a best-effort email notifier is fanned in alongside the logging sink (blank → no email) |
+| `FLOW_NOTIFICATION_EMAIL_FROM` | `aether-flow@localhost` | Sender address for notification emails |
+| `MAIL_HOST` | *(unset)* | SMTP host for the email sink (blank → no `MailSender`, email skipped) |
+| `MAIL_PORT` | `587` | SMTP port |
+| `MAIL_USERNAME` | *(unset)* | SMTP username (never committed — environment-sourced) |
+| `MAIL_PASSWORD` | *(unset)* | SMTP password (never committed — environment-sourced) |
+| `MAIL_SMTP_AUTH` | `true` | Enable SMTP authentication |
+| `MAIL_SMTP_STARTTLS` | `true` | Enable STARTTLS |
 | `SERVER_PORT` | `8085` | HTTP port |
