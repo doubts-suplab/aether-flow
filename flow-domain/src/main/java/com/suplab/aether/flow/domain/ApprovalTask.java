@@ -67,10 +67,26 @@ public record ApprovalTask(
      * @param assignedRole the role expected to action the task
      */
     public static ApprovalTask raise(WorkflowInstance instance, WorkflowStep step, String assignedRole) {
+        return raise(instance, step, assignedRole, null);
+    }
+
+    /**
+     * Factory raising a fresh {@code PENDING} task with an explicitly supplied SLA deadline — used when
+     * the tenant's SLA policy computes the deadline (e.g. against a business-hours calendar). A
+     * {@code null} deadline falls back to {@code slaMinutes} of plain wall-clock time after now.
+     *
+     * @param instance     the parked workflow instance
+     * @param step         the human-approval step (supplies the fallback {@code slaMinutes})
+     * @param assignedRole the role expected to action the task
+     * @param slaDueAt     the computed SLA deadline, or {@code null} for the wall-clock default
+     */
+    public static ApprovalTask raise(WorkflowInstance instance, WorkflowStep step, String assignedRole,
+                                     Instant slaDueAt) {
         var now = Instant.now();
+        var due = slaDueAt != null ? slaDueAt : now.plusSeconds(60L * Math.max(0, step.slaMinutes()));
         return new ApprovalTask(UUID.randomUUID(), instance.tenantId(), instance.id(),
                 instance.workflowKey(), step.key(), assignedRole, ApprovalOutcome.PENDING,
-                now.plusSeconds(60L * Math.max(0, step.slaMinutes())), now, null, null, null, 0);
+                due, now, null, null, null, 0);
     }
 
     /**

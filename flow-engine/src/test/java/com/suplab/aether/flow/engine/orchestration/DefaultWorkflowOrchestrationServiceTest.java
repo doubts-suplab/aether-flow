@@ -2,17 +2,24 @@ package com.suplab.aether.flow.engine.orchestration;
 
 import com.suplab.aether.flow.domain.ApprovalOutcome;
 import com.suplab.aether.flow.domain.ApprovalTask;
+import com.suplab.aether.flow.domain.BusinessHours;
 import com.suplab.aether.flow.domain.FlowScope;
+import com.suplab.aether.flow.domain.SlaPolicy;
 import com.suplab.aether.flow.domain.WorkflowDefinition;
 import com.suplab.aether.flow.domain.WorkflowInstance;
 import com.suplab.aether.flow.domain.WorkflowStatus;
 import com.suplab.aether.flow.domain.WorkflowStep;
 import com.suplab.aether.flow.engine.support.InMemoryStores;
 import com.suplab.aether.flow.ports.ApprovalMetricsPort;
+import com.suplab.aether.flow.ports.SlaPolicyStore;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.time.ZoneOffset;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -41,6 +48,33 @@ class DefaultWorkflowOrchestrationServiceTest {
                 WorkflowStep.automated("intake", "Intake", "review"),
                 WorkflowStep.humanApproval("review", "Manager review", 120, "finance-manager", "finish"),
                 WorkflowStep.end("finish", "Done")));
+    }
+
+    private static final class FakePolicyStore implements SlaPolicyStore {
+        final Map<String, SlaPolicy> byTenant = new HashMap<>();
+        @Override public Optional<SlaPolicy> find(String tenantId) {
+            return Optional.ofNullable(byTenant.get(tenantId));
+        }
+        @Override public void save(SlaPolicy policy) { byTenant.put(policy.tenantId(), policy); }
+    }
+
+    @Test
+    void raise_withBusinessHoursPolicy_setsDeadlineInsideWorkingWindow() {
+        definitions.save(approvalWorkflow());
+        var policies = new FakePolicyStore();
+        // 24h step budget with a Mon–Fri 09:00–17:00 calendar — the raised deadline must land inside
+        // a working window regardless of when the instance starts.
+        policies.save(new SlaPolicy("acme", 60, List.of())
+                .withBusinessHours(BusinessHours.standard(ZoneOffset.UTC)));
+        var bhEngine = new DefaultWorkflowOrchestrationService(definitions, instances, tasks,
+                new com.suplab.aether.flow.engine.notification.LoggingApprovalNotifier(),
+                ApprovalMetricsPort.NO_OP, policies);
+
+        bhEngine.start(SCOPE, "INV-BH");
+
+        var due = tasks.all().get(0).slaDueAt().atZone(ZoneOffset.UTC);
+        assertThat(due.getDayOfWeek().getValue()).isBetween(1, 5);
+        assertThat(due.toLocalTime()).isBetween(java.time.LocalTime.of(9, 0), java.time.LocalTime.of(17, 0));
     }
 
     @Test

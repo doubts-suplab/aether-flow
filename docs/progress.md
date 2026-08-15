@@ -5,13 +5,13 @@
 
 ---
 
-**Active Phase:** Phase 2 — Human Approval & SLA Governance 🔄 (core complete: SLA policy + chain escalation + reassignment + notifications incl. best-effort webhook + email sinks + operator lifecycle metrics; business-hours follow-up)
+**Active Phase:** Phase 2 — Human Approval & SLA Governance ✅ core complete (SLA policy + chain escalation + reassignment + notifications incl. best-effort webhook + email sinks + operator lifecycle metrics + per-tenant business-hours calendars)
 
 | Phase | Name | Status | Sessions |
 |---|---|---|---|
 | 0 | Scaffold | ✅ Complete | 1 |
 | 1 | Orchestration Engine Hardening | ✅ Complete | 2 |
-| 2 | Human Approval & SLA Governance | 🔄 Core complete (policy + chains + reassign + notify) | 3 |
+| 2 | Human Approval & SLA Governance | ✅ Core complete (policy + chains + reassign + notify + metrics + business hours) | 5 |
 | 3 | Grid Integration Deepening | ⏳ Planned | — |
 | 4 | Kubernetes + Helm | ⏳ Planned | — |
 
@@ -61,7 +61,54 @@ flow-engine test + flow-infra copies). The `approval_tasks` UPSERT now also pers
 - `mvn -DskipITs verify` passes the JaCoCo 80% gate.
 
 ### Remaining Phase 2 (follow-up)
-- **Business-hours calendars** in `SlaPolicy` (SLA clock pauses outside working hours).
+- Phase 2 is core complete. Further SLA refinements (holiday calendars, per-workflow overrides) are
+  Phase 3+ candidates.
+
+---
+
+## Phase 2 — Human Approval & SLA Governance ✅ (session 5 — business-hours SLA calendars)
+
+**Commit:** `feat(flow): per-tenant business-hours SLA calendars (V006)`
+
+The SLA clock ran on plain wall time: a task raised at 16:55 with a 30-minute budget was "breached"
+by the next morning, and escalation could climb the whole chain overnight or across a weekend. This
+session makes SLA budgets measure **working time** when a tenant configures a calendar.
+
+### What was done
+
+**Business-hours calendar (domain):**
+- `BusinessHours` value type (flow-domain) — `(zone, start, end, workingDays)` with
+  `deadlineAfter(from, budgetMinutes)`: advances the budget through working windows only, skipping
+  nights, weekends, and non-working days; a start outside the window clocks from the next opening.
+  Validated on construction (start < end, at least one working day). `standard(zone)` = Mon–Fri
+  09:00–17:00.
+- `SlaPolicy` gains an optional `BusinessHours businessHours` (a 3-arg convenience constructor keeps
+  old call-sites valid; `null` = 24/7). `SlaPolicy.deadlineFrom(start, budgetMinutes)` is the single
+  place a deadline is computed — business-hours-aware when a calendar is set, plain wall-clock
+  otherwise — so the initial raise and the escalation reset stay consistent.
+
+**Threaded through both SLA clock points (engine):**
+- `SlaEscalationService` resets a fresh budget via `policy.deadlineFrom(now, defaultSlaMinutes)`.
+- `DefaultWorkflowOrchestrationService` and `DefaultApprovalGateway` accept an optional
+  `SlaPolicyStore`; when present, a raised task's initial deadline is computed against the tenant's
+  calendar. Convenience constructors keep the policy store optional (null → wall-clock), so existing
+  wiring and tests are unaffected. `ApprovalTask.raise(instance, step, role, slaDueAt)` overload
+  carries the computed deadline.
+
+**Persistence + API:**
+- `JdbcSlaPolicyStore` reads/writes four nullable columns (`business_zone`, `business_start`,
+  `business_end`, `business_days`); NULL across the set = 24/7. **V006** migration adds them (×3:
+  flow-api, flow-engine test, flow-infra).
+- `SlaPolicyController` accepts an optional `businessHours` block on `PUT` (zone, `HH:mm` start/end,
+  `DayOfWeek` names) and returns it on `GET`; incomplete or unparseable calendars → `400` (not `500`).
+
+**Tests — 132 unit tests green (was 118):**
+- `BusinessHoursTest` (8): same-day, next-day spill, weekend skip, before-window, non-working-day,
+  non-positive budget, `isWithin`. `SlaPolicyTest` (+3): 24/7 default, working-time deadline, clamp.
+- Engine: `SlaEscalationServiceTest` (business-hours reset lands in a working window) +
+  `DefaultWorkflowOrchestrationServiceTest` (raise deadline inside the window).
+  `SlaPolicyControllerTest` (+2): business-hours round-trip view, invalid-calendar 400.
+- ITs: `JdbcSlaPolicyStoreIT` (+2) — calendar round-trip + clearing on re-save (upsert), under failsafe.
 
 ---
 

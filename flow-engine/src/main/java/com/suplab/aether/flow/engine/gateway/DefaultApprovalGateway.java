@@ -10,11 +10,13 @@ import com.suplab.aether.flow.ports.ApprovalGatewayPort;
 import com.suplab.aether.flow.ports.ApprovalMetricsPort;
 import com.suplab.aether.flow.ports.ApprovalNotificationPort;
 import com.suplab.aether.flow.ports.ApprovalTaskStore;
+import com.suplab.aether.flow.ports.SlaPolicyStore;
 import com.suplab.aether.flow.ports.WorkflowDefinitionStore;
 import com.suplab.aether.flow.ports.WorkflowInstanceStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.time.Instant;
 import java.util.List;
 
 /**
@@ -47,6 +49,7 @@ public class DefaultApprovalGateway implements ApprovalGatewayPort {
     private final ApprovalTaskStore approvalTaskStore;
     private final ApprovalNotificationPort notifier;
     private final ApprovalMetricsPort metrics;
+    private final SlaPolicyStore policyStore;
     private final int deferralSlaMinutes;
 
     /** Convenience constructor without a metrics backend — records are no-ops. */
@@ -56,10 +59,23 @@ public class DefaultApprovalGateway implements ApprovalGatewayPort {
                                   ApprovalNotificationPort notifier,
                                   int deferralSlaMinutes) {
         this(definitionStore, instanceStore, approvalTaskStore, notifier, ApprovalMetricsPort.NO_OP,
-                deferralSlaMinutes);
+                null, deferralSlaMinutes);
+    }
+
+    /** Convenience constructor without a policy store — deferral deadlines use wall-clock budgets. */
+    public DefaultApprovalGateway(WorkflowDefinitionStore definitionStore,
+                                  WorkflowInstanceStore instanceStore,
+                                  ApprovalTaskStore approvalTaskStore,
+                                  ApprovalNotificationPort notifier,
+                                  ApprovalMetricsPort metrics,
+                                  int deferralSlaMinutes) {
+        this(definitionStore, instanceStore, approvalTaskStore, notifier, metrics, null, deferralSlaMinutes);
     }
 
     /**
+     * @param policyStore        optional per-tenant SLA policy store; when present the deferral task's
+     *                           deadline honours the tenant's business-hours calendar. {@code null}
+     *                           preserves plain wall-clock deadlines.
      * @param deferralSlaMinutes SLA budget for a deferral's approval task before it is escalated
      */
     public DefaultApprovalGateway(WorkflowDefinitionStore definitionStore,
@@ -67,12 +83,14 @@ public class DefaultApprovalGateway implements ApprovalGatewayPort {
                                   ApprovalTaskStore approvalTaskStore,
                                   ApprovalNotificationPort notifier,
                                   ApprovalMetricsPort metrics,
+                                  SlaPolicyStore policyStore,
                                   int deferralSlaMinutes) {
         this.definitionStore = definitionStore;
         this.instanceStore = instanceStore;
         this.approvalTaskStore = approvalTaskStore;
         this.notifier = notifier;
         this.metrics = metrics;
+        this.policyStore = policyStore;
         this.deferralSlaMinutes = deferralSlaMinutes;
     }
 
@@ -85,7 +103,8 @@ public class DefaultApprovalGateway implements ApprovalGatewayPort {
         var instance = WorkflowInstance.start(definition, decision.correlationId()).park(reviewStep);
         instanceStore.save(instance);
 
-        var task = ApprovalTask.raise(instance, reviewStep, decision.requestedRole());
+        var task = ApprovalTask.raise(instance, reviewStep, decision.requestedRole(),
+                raiseDeadline(decision.tenantId(), reviewStep));
         approvalTaskStore.save(task);
         notifyRaised(task);
         metrics.recordRaised(task);
@@ -106,6 +125,18 @@ public class DefaultApprovalGateway implements ApprovalGatewayPort {
         log.info("Created canonical deferral definition for tenantId={} slaMinutes={}",
                 scope.tenantId(), deferralSlaMinutes);
         return definition;
+    }
+
+    /**
+     * Computes the deferral task's initial SLA deadline, honouring the tenant's business-hours
+     * calendar when a policy store is configured. Returns {@code null} — the wall-clock default — when
+     * no policy store is wired or the tenant has no stored policy.
+     */
+    private Instant raiseDeadline(String tenantId, WorkflowStep step) {
+        if (policyStore == null) return null;
+        return policyStore.find(tenantId)
+                .map(policy -> policy.deadlineFrom(Instant.now(), step.slaMinutes()))
+                .orElse(null);
     }
 
     /** Best-effort raise notification — a failing sink must never break deferral intake. */

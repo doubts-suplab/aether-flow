@@ -139,9 +139,10 @@ public class FlowApiConfig {
                                                  WorkflowInstanceStore instanceStore,
                                                  ApprovalTaskStore approvalTaskStore,
                                                  ApprovalNotificationPort notifier,
-                                                 ApprovalMetricsPort metrics) {
+                                                 ApprovalMetricsPort metrics,
+                                                 SlaPolicyStore slaPolicyStore) {
         return new DefaultWorkflowOrchestrationService(definitionStore, instanceStore, approvalTaskStore,
-                notifier, metrics);
+                notifier, metrics, slaPolicyStore);
     }
 
     /**
@@ -156,9 +157,10 @@ public class FlowApiConfig {
             ApprovalTaskStore approvalTaskStore,
             ApprovalNotificationPort notifier,
             ApprovalMetricsPort metrics,
+            SlaPolicyStore slaPolicyStore,
             @Value("${aether.flow.deferral.sla-minutes:60}") int deferralSlaMinutes) {
         return new DefaultApprovalGateway(definitionStore, instanceStore, approvalTaskStore, notifier,
-                metrics, deferralSlaMinutes);
+                metrics, slaPolicyStore, deferralSlaMinutes);
     }
 
     /**

@@ -1,5 +1,6 @@
 package com.suplab.aether.flow.engine.store;
 
+import com.suplab.aether.flow.domain.BusinessHours;
 import com.suplab.aether.flow.domain.SlaPolicy;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeEach;
@@ -11,6 +12,10 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
+import java.time.DayOfWeek;
+import java.time.LocalTime;
+import java.time.ZoneId;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.UUID;
 
@@ -62,6 +67,35 @@ class JdbcSlaPolicyStoreIT {
         var tenant = "tenant-" + UUID.randomUUID();
         store.save(new SlaPolicy(tenant, 60, List.of()));
         assertThat(store.find(tenant).orElseThrow().escalationChain()).isEmpty();
+    }
+
+    @Test
+    void businessHours_roundTrip() {
+        var tenant = "tenant-" + UUID.randomUUID();
+        var hours = new BusinessHours(ZoneId.of("Europe/London"), LocalTime.of(9, 0), LocalTime.of(17, 30),
+                EnumSet.of(DayOfWeek.MONDAY, DayOfWeek.WEDNESDAY, DayOfWeek.FRIDAY));
+        store.save(new SlaPolicy(tenant, 60, List.of("lead")).withBusinessHours(hours));
+
+        var found = store.find(tenant).orElseThrow();
+        assertThat(found.hasBusinessHours()).isTrue();
+        var stored = found.businessHours();
+        assertThat(stored.zone()).isEqualTo(ZoneId.of("Europe/London"));
+        assertThat(stored.start()).isEqualTo(LocalTime.of(9, 0));
+        assertThat(stored.end()).isEqualTo(LocalTime.of(17, 30));
+        assertThat(stored.workingDays())
+                .containsExactlyInAnyOrder(DayOfWeek.MONDAY, DayOfWeek.WEDNESDAY, DayOfWeek.FRIDAY);
+    }
+
+    @Test
+    void updatingPolicy_canClearBusinessHours() {
+        var tenant = "tenant-" + UUID.randomUUID();
+        store.save(new SlaPolicy(tenant, 60, List.of())
+                .withBusinessHours(BusinessHours.standard(ZoneId.of("UTC"))));
+        assertThat(store.find(tenant).orElseThrow().hasBusinessHours()).isTrue();
+
+        // Re-saving without a calendar nulls the columns (upsert overwrites).
+        store.save(new SlaPolicy(tenant, 60, List.of()));
+        assertThat(store.find(tenant).orElseThrow().hasBusinessHours()).isFalse();
     }
 
     @Test
