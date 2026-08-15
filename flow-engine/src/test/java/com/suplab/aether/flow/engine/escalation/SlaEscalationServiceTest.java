@@ -2,6 +2,7 @@ package com.suplab.aether.flow.engine.escalation;
 
 import com.suplab.aether.flow.domain.ApprovalOutcome;
 import com.suplab.aether.flow.domain.ApprovalTask;
+import com.suplab.aether.flow.domain.BusinessHours;
 import com.suplab.aether.flow.domain.SlaPolicy;
 import com.suplab.aether.flow.engine.support.InMemoryStores;
 import com.suplab.aether.flow.ports.ApprovalNotificationPort;
@@ -9,6 +10,7 @@ import com.suplab.aether.flow.ports.SlaPolicyStore;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -95,6 +97,29 @@ class SlaEscalationServiceTest {
         assertThat(result.escalatedCount()).isZero();
         assertThat(notifier.escalated).isZero();
         assertThat(tasks.findById(tenant, exhausted.id()).orElseThrow().assignedRole()).isEqualTo("manager");
+    }
+
+    @Test
+    void businessHoursPolicy_resetsDeadlineInsideWorkingWindow() {
+        var tenant = "tenant-bh";
+        var tasks = new InMemoryStores.Tasks();
+        var breached = task(tenant, "reviewer", ApprovalOutcome.PENDING, 0);
+        tasks.save(breached);
+        var policies = new FakePolicyStore();
+        // 24h budget with a Mon–Fri 09:00–17:00 calendar: the fresh deadline must land inside a
+        // working window, never on a night/weekend hour.
+        policies.save(new SlaPolicy(tenant, 24 * 60, List.of("lead"))
+                .withBusinessHours(BusinessHours.standard(ZoneOffset.UTC)));
+        var service = new SlaEscalationService(tasks, policies, new CountingNotifier());
+
+        service.sweep();
+
+        var stored = tasks.findById(tenant, breached.id()).orElseThrow();
+        assertThat(stored.assignedRole()).isEqualTo("lead");
+        var due = stored.slaDueAt().atZone(ZoneOffset.UTC);
+        assertThat(due.getDayOfWeek().getValue()).isBetween(1, 5);          // Mon–Fri
+        assertThat(due.toLocalTime()).isBetween(java.time.LocalTime.of(9, 0),
+                java.time.LocalTime.of(17, 0));                              // within the window
     }
 
     @Test

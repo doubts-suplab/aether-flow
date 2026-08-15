@@ -87,7 +87,9 @@ public class SlaEscalationService implements SlaEscalationPort {
         int level = task.escalationLevel();
         if (policy.hasNextLevel(level)) {
             var nextRole = policy.roleAtLevel(level).orElseThrow();
-            var newDueAt = now.plusSeconds(60L * policy.defaultSlaMinutes());
+            // Fresh budget for the next authority — measured in working time when the tenant has a
+            // business-hours calendar, plain wall-clock otherwise.
+            var newDueAt = policy.deadlineFrom(now, policy.defaultSlaMinutes());
             return task.escalate(nextRole, newDueAt);
         }
         if (task.outcome() == ApprovalOutcome.PENDING) {

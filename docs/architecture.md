@@ -75,12 +75,12 @@ DeferredDecision = (correlationId, tenantId, agentId, summary, confidence, reque
 | `WorkflowDefinitionStore` | `JdbcWorkflowDefinitionStore` | Persist/retrieve definitions (JSONB step graph); scoped |
 | `WorkflowInstanceStore` | `JdbcWorkflowInstanceStore` | Persist every instance transition; the durable state |
 | `ApprovalTaskStore` | `JdbcApprovalTaskStore` | Persist the human review queue; open-task lookups; breached-task batch + open count for the sweep |
-| `SlaPolicyStore` | `JdbcSlaPolicyStore` | Per-tenant SLA budget + escalation chain (upsert by tenant) |
+| `SlaPolicyStore` | `JdbcSlaPolicyStore` | Per-tenant SLA budget + escalation chain + optional business-hours calendar (upsert by tenant) |
 | `ApprovalNotificationPort` | `LoggingApprovalNotifier`, `WebhookApprovalNotifier`, `EmailApprovalNotifier`, `CompositeApprovalNotifier` | Reviewer notifications on task raise + escalation. Logging default is always on; config-gated best-effort webhook (`…webhook.url`) and email (`…email.to`, over `JavaMailSender`) sinks are fanned in via the composite when set. Each sink is best-effort — a transport failure never breaks task raising or the escalation sweep |
 | `ApprovalMetricsPort` | `MicrometerApprovalMetrics` (`NO_OP` default) | Operator counters over the approval lifecycle — `aether.flow.approvals.{raised,approved,rejected,reassigned}`. Framework-free port; the Micrometer adapter lives in the API module so the engine stays library-agnostic |
 | `WorkflowEnginePort` | `DefaultWorkflowOrchestrationService` | Start / advance instances; resume on approve/reject; **cancel** (stops the instance, withdraws its open task); notifies + meters on raise/approve/reject |
 | `ApprovalGatewayPort` | `DefaultApprovalGateway` | Grid DEFER → parked human-approval workflow; notifies + meters on raise |
-| `SlaEscalationPort` | `SlaEscalationService` | Policy-driven sweep routing breached tasks up the tenant's escalation chain (reassign + fresh budget per level), or flagging ESCALATED when no chain |
+| `SlaEscalationPort` | `SlaEscalationService` | Policy-driven sweep routing breached tasks up the tenant's escalation chain (reassign + fresh budget per level, computed via `SlaPolicy.deadlineFrom` so a business-hours calendar is honoured), or flagging ESCALATED when no chain |
 
 ---
 
@@ -93,6 +93,7 @@ DeferredDecision = (correlationId, tenantId, agentId, summary, confidence, reque
 | `V003` | `approval_tasks` | Human review queue; `instance_id` FK `ON DELETE CASCADE`; partial index for the open queue and for the SLA sweep (`outcome='PENDING'` by `sla_due_at`) |
 | `V004` | `approval_tasks.outcome` CHECK | Extends the outcome constraint to allow `WITHDRAWN` (a task closed because its instance was cancelled) |
 | `V005` | `tenant_sla_policy` + `approval_tasks.escalation_level` | Per-tenant SLA budget + comma-separated escalation chain (one row per tenant); `escalation_level` tracks how far a task has climbed the chain (drives the next hop) |
+| `V006` | `tenant_sla_policy` business-hours columns | Nullable `business_zone` / `business_start` / `business_end` / `business_days` — a tenant's working-hours calendar; NULL across the set = 24/7 SLAs (prior behaviour) |
 
 Flow owns **no** vector store or embedding — the step graph is plain JSONB, everything else is relational. This keeps Flow single-store on PostgreSQL like the rest of the ecosystem, with no LLM runtime dependency.
 
@@ -123,7 +124,7 @@ Flow owns **no** vector store or embedding — the step graph is plain JSONB, ev
 ### 5.4 SLA escalation (policy-driven, chain-routed)
 1. Scheduler (`@Scheduled`, default every 5 min) → `SlaEscalationPort.sweep`.
 2. The sweep loads a batch of breached open tasks (`outcome IN (PENDING, ESCALATED) AND sla_due_at < NOW()`, oldest first) and, per task, loads the tenant's `SlaPolicy` (cached per sweep; default budget + empty chain when none stored).
-3. Routing: a task at `escalation_level = L` whose policy chain has a role at `L` is **reassigned** to that role, flagged `ESCALATED`, given a **fresh SLA budget** (`default_sla_minutes`), and its level bumped — so a still-unactioned task climbs role → manager → executive across successive sweeps. When the chain is exhausted the task stays `ESCALATED` (visibility only). A tenant with no chain keeps the original behaviour: a breached `PENDING` task is flagged `ESCALATED` once. Escalation never decides — a human always does.
+3. Routing: a task at `escalation_level = L` whose policy chain has a role at `L` is **reassigned** to that role, flagged `ESCALATED`, given a **fresh SLA budget** (`default_sla_minutes`, computed via `SlaPolicy.deadlineFrom` so a business-hours calendar is honoured — the fresh deadline lands inside the tenant's working window, never overnight or across a weekend), and its level bumped — so a still-unactioned task climbs role → manager → executive across successive sweeps. When the chain is exhausted the task stays `ESCALATED` (visibility only). A tenant with no chain keeps the original behaviour: a breached `PENDING` task is flagged `ESCALATED` once. Escalation never decides — a human always does.
 4. Each escalation fires `ApprovalNotificationPort.notifyEscalated`. Micrometer: `aether.flow.escalation.escalated` counter, `aether.flow.approvals.open` gauge.
 
 ### 5.5 Grid DEFER intake

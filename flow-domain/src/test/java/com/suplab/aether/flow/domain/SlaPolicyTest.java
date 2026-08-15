@@ -2,6 +2,8 @@ package com.suplab.aether.flow.domain;
 
 import org.junit.jupiter.api.Test;
 
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.Arrays;
 import java.util.List;
 
@@ -46,5 +48,31 @@ class SlaPolicyTest {
     @Test
     void nullChainBecomesEmpty() {
         assertThat(new SlaPolicy("t", 30, null).escalationChain()).isEmpty();
+    }
+
+    @Test
+    void defaultPolicyHasNoBusinessHours_andUsesWallClock() {
+        var policy = SlaPolicy.defaultFor("t");
+        assertThat(policy.hasBusinessHours()).isFalse();
+        var start = LocalDateTime.of(2026, 8, 19, 10, 0).toInstant(ZoneOffset.UTC);
+        // No calendar → plain wall-clock: start + 30 minutes.
+        assertThat(policy.deadlineFrom(start, 30)).isEqualTo(start.plusSeconds(1800));
+    }
+
+    @Test
+    void withBusinessHours_measuresWorkingTime() {
+        var policy = new SlaPolicy("t", 60, List.of())
+                .withBusinessHours(BusinessHours.standard(ZoneOffset.UTC));
+        assertThat(policy.hasBusinessHours()).isTrue();
+        // Fri 16:30 + 60 working minutes spills across the weekend to Mon 09:30.
+        var friEvening = LocalDateTime.of(2026, 8, 21, 16, 30).toInstant(ZoneOffset.UTC);
+        var expected = LocalDateTime.of(2026, 8, 24, 9, 30).toInstant(ZoneOffset.UTC);
+        assertThat(policy.deadlineFrom(friEvening, 60)).isEqualTo(expected);
+    }
+
+    @Test
+    void negativeBudget_isClampedToZero() {
+        var start = LocalDateTime.of(2026, 8, 19, 10, 0).toInstant(ZoneOffset.UTC);
+        assertThat(SlaPolicy.defaultFor("t").deadlineFrom(start, -5)).isEqualTo(start);
     }
 }

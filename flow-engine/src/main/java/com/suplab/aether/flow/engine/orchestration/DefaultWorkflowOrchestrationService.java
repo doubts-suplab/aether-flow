@@ -2,18 +2,21 @@ package com.suplab.aether.flow.engine.orchestration;
 
 import com.suplab.aether.flow.domain.ApprovalTask;
 import com.suplab.aether.flow.domain.FlowScope;
+import com.suplab.aether.flow.domain.SlaPolicy;
 import com.suplab.aether.flow.domain.WorkflowDefinition;
 import com.suplab.aether.flow.domain.WorkflowInstance;
 import com.suplab.aether.flow.domain.WorkflowStep;
 import com.suplab.aether.flow.ports.ApprovalMetricsPort;
 import com.suplab.aether.flow.ports.ApprovalNotificationPort;
 import com.suplab.aether.flow.ports.ApprovalTaskStore;
+import com.suplab.aether.flow.ports.SlaPolicyStore;
 import com.suplab.aether.flow.ports.WorkflowDefinitionStore;
 import com.suplab.aether.flow.ports.WorkflowEnginePort;
 import com.suplab.aether.flow.ports.WorkflowInstanceStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.time.Instant;
 import java.util.UUID;
 
 /**
@@ -41,25 +44,42 @@ public class DefaultWorkflowOrchestrationService implements WorkflowEnginePort {
     private final ApprovalTaskStore approvalTaskStore;
     private final ApprovalNotificationPort notifier;
     private final ApprovalMetricsPort metrics;
+    private final SlaPolicyStore policyStore;
 
     /** Convenience constructor without a metrics backend — records are no-ops. */
     public DefaultWorkflowOrchestrationService(WorkflowDefinitionStore definitionStore,
                                                WorkflowInstanceStore instanceStore,
                                                ApprovalTaskStore approvalTaskStore,
                                                ApprovalNotificationPort notifier) {
-        this(definitionStore, instanceStore, approvalTaskStore, notifier, ApprovalMetricsPort.NO_OP);
+        this(definitionStore, instanceStore, approvalTaskStore, notifier, ApprovalMetricsPort.NO_OP, null);
     }
 
+    /** Convenience constructor without a policy store — SLA deadlines use plain wall-clock budgets. */
     public DefaultWorkflowOrchestrationService(WorkflowDefinitionStore definitionStore,
                                                WorkflowInstanceStore instanceStore,
                                                ApprovalTaskStore approvalTaskStore,
                                                ApprovalNotificationPort notifier,
                                                ApprovalMetricsPort metrics) {
+        this(definitionStore, instanceStore, approvalTaskStore, notifier, metrics, null);
+    }
+
+    /**
+     * @param policyStore optional per-tenant SLA policy store; when present, a raised task's initial
+     *                    deadline is computed against the tenant's business-hours calendar (24/7 when
+     *                    the tenant has none). {@code null} preserves plain wall-clock deadlines.
+     */
+    public DefaultWorkflowOrchestrationService(WorkflowDefinitionStore definitionStore,
+                                               WorkflowInstanceStore instanceStore,
+                                               ApprovalTaskStore approvalTaskStore,
+                                               ApprovalNotificationPort notifier,
+                                               ApprovalMetricsPort metrics,
+                                               SlaPolicyStore policyStore) {
         this.definitionStore = definitionStore;
         this.instanceStore = instanceStore;
         this.approvalTaskStore = approvalTaskStore;
         this.notifier = notifier;
         this.metrics = metrics;
+        this.policyStore = policyStore;
     }
 
     @Override
@@ -144,7 +164,8 @@ public class DefaultWorkflowOrchestrationService implements WorkflowEnginePort {
             if (step.type().requiresHuman()) {
                 var parked = current.park(step);
                 instanceStore.save(parked);
-                var task = ApprovalTask.raise(parked, step, step.assignedRole());
+                var task = ApprovalTask.raise(parked, step, step.assignedRole(),
+                        raiseDeadline(parked.tenantId(), step));
                 approvalTaskStore.save(task);
                 notifyRaised(task);
                 metrics.recordRaised(task);
@@ -166,6 +187,18 @@ public class DefaultWorkflowOrchestrationService implements WorkflowEnginePort {
         instanceStore.save(failed);
         log.warn("Instance id={} exceeded {} transitions — marked FAILED", failed.id(), MAX_TRANSITIONS);
         return failed;
+    }
+
+    /**
+     * Computes the initial SLA deadline for a task raised at {@code step}, honouring the tenant's
+     * business-hours calendar when a policy store is configured. Returns {@code null} — the wall-clock
+     * default — when no policy store is wired or the tenant has no stored policy.
+     */
+    private Instant raiseDeadline(String tenantId, WorkflowStep step) {
+        if (policyStore == null) return null;
+        return policyStore.find(tenantId)
+                .map(policy -> policy.deadlineFrom(Instant.now(), step.slaMinutes()))
+                .orElse(null);
     }
 
     private ApprovalTask requireTask(String tenantId, UUID taskId) {

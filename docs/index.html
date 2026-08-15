@@ -132,7 +132,7 @@
     <div class="cap-card">
       <div class="type">Human-in-the-loop</div>
       <h3>Approval Gates</h3>
-      <p>Role-assigned review tasks with SLA deadlines; a scheduled sweep escalates breaches — never auto-decides.</p>
+      <p>Role-assigned review tasks with SLA deadlines (optionally measured against a per-tenant business-hours calendar); a scheduled sweep escalates breaches — never auto-decides.</p>
     </div>
     <div class="cap-card">
       <div class="type">Durability</div>
@@ -224,7 +224,7 @@
   <div class="roadmap">
     <div class="roadmap-item"><span class="dot done"></span><span class="phase-label">P0</span><span class="phase-name">Scaffold</span><span class="status-badge done">Complete</span></div>
     <div class="roadmap-item"><span class="dot done"></span><span class="phase-label">P1</span><span class="phase-name">Orchestration Engine Hardening — cancellation, stats, ITs, versioning, rework branching</span><span class="status-badge done">Complete</span></div>
-    <div class="roadmap-item"><span class="dot done"></span><span class="phase-label">P2</span><span class="phase-name">Human Approval &amp; SLA Governance — per-tenant SLA policy, multi-level escalation chains, task reassignment, raise/escalation notifications (logging default + config-gated best-effort webhook and email sinks), and operator lifecycle metrics (Micrometer counters for raised/approved/rejected/reassigned)</span><span class="status-badge done">Core Complete</span></div>
+    <div class="roadmap-item"><span class="dot done"></span><span class="phase-label">P2</span><span class="phase-name">Human Approval &amp; SLA Governance — per-tenant SLA policy, multi-level escalation chains, task reassignment, raise/escalation notifications (logging default + config-gated best-effort webhook and email sinks), operator lifecycle metrics (Micrometer counters for raised/approved/rejected/reassigned), and per-tenant business-hours SLA calendars (budgets consume working time only)</span><span class="status-badge done">Core Complete</span></div>
     <div class="roadmap-item"><span class="dot planned"></span><span class="phase-label">P3</span><span class="phase-name">Grid Integration Deepening</span><span class="status-badge planned">Planned</span></div>
     <div class="roadmap-item"><span class="dot planned"></span><span class="phase-label">P4</span><span class="phase-name">Kubernetes + Helm</span><span class="status-badge planned">Planned</span></div>
   </div>

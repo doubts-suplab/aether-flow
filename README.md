@@ -43,7 +43,7 @@ cd ../.. && mvn spring-boot:run -pl flow-api
 | `POST` | `/api/v1/tenants/{tenantId}/approvals/{taskId}/approve` | Approve — advance the instance past the gate |
 | `POST` | `/api/v1/tenants/{tenantId}/approvals/{taskId}/reject` | Reject — stop the instance |
 | `POST` | `/api/v1/tenants/{tenantId}/approvals/{taskId}/reassign` | Delegate an open task to another role |
-| `GET`/`PUT` | `/api/v1/tenants/{tenantId}/sla-policy` | Per-tenant SLA budget + escalation chain |
+| `GET`/`PUT` | `/api/v1/tenants/{tenantId}/sla-policy` | Per-tenant SLA budget + escalation chain + optional business-hours calendar (SLA budgets consume working time only) |
 | `POST` | `/api/v1/deferrals` | Aether Grid DEFER intake → human-approval workflow |
 | `GET` | `/actuator/health` | Liveness + readiness probes |
 

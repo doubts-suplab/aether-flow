@@ -51,4 +51,39 @@ class SlaPolicyControllerTest {
         assertThat(controller.put("t", new SlaPolicyController.PolicyRequest(-5, List.of()))
                 .getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
     }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void put_storesBusinessHours_andGetReturnsIt() {
+        var store = new FakePolicyStore();
+        var controller = new SlaPolicyController(store);
+        var hours = new SlaPolicyController.BusinessHoursRequest(
+                "Europe/London", "09:00", "17:00", List.of("MONDAY", "FRIDAY"));
+        var req = new SlaPolicyController.PolicyRequest(30, List.of("lead"), hours);
+
+        var putRes = controller.put("tenant-1", req);
+        assertThat(putRes.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(store.byTenant.get("tenant-1").hasBusinessHours()).isTrue();
+
+        var getRes = new SlaPolicyController(store).get("tenant-1");
+        var view = (Map<String, Object>) getRes.getBody().get("businessHours");
+        assertThat(view).isNotNull();
+        assertThat(view.get("zone")).isEqualTo("Europe/London");
+        assertThat(view.get("start")).isEqualTo("09:00");
+        assertThat((List<String>) view.get("days")).containsExactlyInAnyOrder("MONDAY", "FRIDAY");
+    }
+
+    @Test
+    void put_rejectsIncompleteBusinessHours() {
+        var controller = new SlaPolicyController(new FakePolicyStore());
+        // Missing zone → 400, not a 500.
+        var bad = new SlaPolicyController.BusinessHoursRequest(null, "09:00", "17:00", List.of("MONDAY"));
+        assertThat(controller.put("t", new SlaPolicyController.PolicyRequest(30, List.of(), bad))
+                .getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        // Unparseable zone → 400 (DateTimeException mapped).
+        var badZone = new SlaPolicyController.BusinessHoursRequest("Nowhere/Void", "09:00", "17:00",
+                List.of("MONDAY"));
+        assertThat(controller.put("t", new SlaPolicyController.PolicyRequest(30, List.of(), badZone))
+                .getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+    }
 }
