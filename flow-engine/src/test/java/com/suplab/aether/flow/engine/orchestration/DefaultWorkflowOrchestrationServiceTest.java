@@ -3,6 +3,8 @@ package com.suplab.aether.flow.engine.orchestration;
 import com.suplab.aether.flow.domain.ApprovalOutcome;
 import com.suplab.aether.flow.domain.ApprovalTask;
 import com.suplab.aether.flow.domain.BusinessHours;
+import com.suplab.aether.flow.domain.DeferralOutcome;
+import com.suplab.aether.flow.domain.DeferredDecision;
 import com.suplab.aether.flow.domain.FlowScope;
 import com.suplab.aether.flow.domain.SlaPolicy;
 import com.suplab.aether.flow.domain.WorkflowDefinition;
@@ -11,6 +13,7 @@ import com.suplab.aether.flow.domain.WorkflowStatus;
 import com.suplab.aether.flow.domain.WorkflowStep;
 import com.suplab.aether.flow.engine.support.InMemoryStores;
 import com.suplab.aether.flow.ports.ApprovalMetricsPort;
+import com.suplab.aether.flow.ports.GridOutcomePort;
 import com.suplab.aether.flow.ports.SlaPolicyStore;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -171,6 +174,90 @@ class DefaultWorkflowOrchestrationServiceTest {
         assertThat(metrics.raised).isEqualTo(2);
         assertThat(metrics.approved).isEqualTo(1);
         assertThat(metrics.rejected).isEqualTo(1);
+    }
+
+    private WorkflowDefinition deferralWorkflow() {
+        // Mirrors the canonical grid-deferral definition: a single human review then END.
+        return WorkflowDefinition.create(FlowScope.of("acme", DeferredDecision.WORKFLOW_KEY),
+                "Grid Deferral Review", List.of(
+                        WorkflowStep.humanApproval("review", "Review deferred decision", 60, "reviewer", "resolved"),
+                        WorkflowStep.end("resolved", "Deferral resolved")));
+    }
+
+    private static final class RecordingGridOutcome implements GridOutcomePort {
+        final List<DeferralOutcome> reported = new java.util.ArrayList<>();
+        @Override public void reportOutcome(DeferralOutcome outcome) { reported.add(outcome); }
+    }
+
+    private DefaultWorkflowOrchestrationService engineWith(GridOutcomePort gridOutcome) {
+        return new DefaultWorkflowOrchestrationService(definitions, instances, tasks,
+                new com.suplab.aether.flow.engine.notification.LoggingApprovalNotifier(),
+                ApprovalMetricsPort.NO_OP, null, gridOutcome);
+    }
+
+    @Test
+    void approve_reportsApprovedOutcomeBackToGridForADeferralWorkflow() {
+        var grid = new RecordingGridOutcome();
+        var deferralEngine = engineWith(grid);
+        definitions.save(deferralWorkflow());
+        var scope = FlowScope.of("acme", DeferredDecision.WORKFLOW_KEY);
+        var parked = deferralEngine.start(scope, "corr-1");
+        var task = tasks.findOpenByInstance("acme", parked.id()).orElseThrow();
+
+        deferralEngine.approve("acme", task.id(), "alice", "looks good");
+
+        assertThat(grid.reported).hasSize(1);
+        var outcome = grid.reported.get(0);
+        assertThat(outcome.correlationId()).isEqualTo("corr-1");
+        assertThat(outcome.tenantId()).isEqualTo("acme");
+        assertThat(outcome.decision()).isEqualTo(DeferralOutcome.APPROVED);
+        assertThat(outcome.decidedBy()).isEqualTo("alice");
+    }
+
+    @Test
+    void reject_reportsRejectedOutcomeBackToGridForADeferralWorkflow() {
+        var grid = new RecordingGridOutcome();
+        var deferralEngine = engineWith(grid);
+        definitions.save(deferralWorkflow());
+        var scope = FlowScope.of("acme", DeferredDecision.WORKFLOW_KEY);
+        var parked = deferralEngine.start(scope, "corr-2");
+        var task = tasks.findOpenByInstance("acme", parked.id()).orElseThrow();
+
+        deferralEngine.reject("acme", task.id(), "bob", "not allowed");
+
+        assertThat(grid.reported).hasSize(1);
+        assertThat(grid.reported.get(0).decision()).isEqualTo(DeferralOutcome.REJECTED);
+        assertThat(grid.reported.get(0).correlationId()).isEqualTo("corr-2");
+    }
+
+    @Test
+    void decidingANonDeferralWorkflowReportsNoGridOutcome() {
+        var grid = new RecordingGridOutcome();
+        var normalEngine = engineWith(grid);
+        definitions.save(approvalWorkflow());
+        normalEngine.start(SCOPE, "INV-1001");
+        var task = tasks.all().get(0);
+
+        normalEngine.approve("acme", task.id(), "alice", "ok");
+
+        assertThat(grid.reported).isEmpty();
+    }
+
+    @Test
+    void aFailingGridCallbackNeverBreaksTheDecision() {
+        GridOutcomePort exploding = outcome -> { throw new RuntimeException("grid unreachable"); };
+        var deferralEngine = engineWith(exploding);
+        definitions.save(deferralWorkflow());
+        var scope = FlowScope.of("acme", DeferredDecision.WORKFLOW_KEY);
+        var parked = deferralEngine.start(scope, "corr-3");
+        var task = tasks.findOpenByInstance("acme", parked.id()).orElseThrow();
+
+        var completed = deferralEngine.approve("acme", task.id(), "alice", "ok");
+
+        // The decision still lands even though the callback threw — best-effort, swallowed.
+        assertThat(completed.status()).isEqualTo(WorkflowStatus.COMPLETED);
+        assertThat(tasks.findById("acme", task.id()).orElseThrow().outcome())
+                .isEqualTo(ApprovalOutcome.APPROVED);
     }
 
     private static final class RecordingMetrics implements ApprovalMetricsPort {

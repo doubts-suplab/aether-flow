@@ -3,6 +3,8 @@ package com.suplab.aether.flow.api.config;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.suplab.aether.flow.engine.escalation.SlaEscalationService;
 import com.suplab.aether.flow.engine.gateway.DefaultApprovalGateway;
+import com.suplab.aether.flow.engine.gateway.HttpGridOutcomeNotifier;
+import com.suplab.aether.flow.engine.gateway.LoggingGridOutcomeNotifier;
 import com.suplab.aether.flow.engine.notification.CompositeApprovalNotifier;
 import com.suplab.aether.flow.engine.notification.EmailApprovalNotifier;
 import com.suplab.aether.flow.engine.notification.LoggingApprovalNotifier;
@@ -17,6 +19,7 @@ import com.suplab.aether.flow.ports.ApprovalGatewayPort;
 import com.suplab.aether.flow.ports.ApprovalMetricsPort;
 import com.suplab.aether.flow.ports.ApprovalNotificationPort;
 import com.suplab.aether.flow.ports.ApprovalTaskStore;
+import com.suplab.aether.flow.ports.GridOutcomePort;
 import com.suplab.aether.flow.ports.SlaEscalationPort;
 import com.suplab.aether.flow.ports.SlaPolicyStore;
 import com.suplab.aether.flow.ports.WorkflowDefinitionStore;
@@ -132,6 +135,30 @@ public class FlowApiConfig {
     }
 
     /**
+     * Creates the Grid outcome callback port — the closing half of the DEFER seam. The logging default
+     * keeps Flow standalone; when {@code aether.flow.grid.callback-url} is set, a best-effort
+     * {@link HttpGridOutcomeNotifier} POSTs each resolved deferral's terminal outcome back to Grid,
+     * keyed by the deferral's {@code correlationId}. The payload is bounded — no comment, request
+     * internals, or PII.
+     *
+     * @param callbackUrl    optional Grid callback endpoint for resolved deferrals (blank → logging only)
+     * @param timeoutSeconds per-request connect/read timeout for the callback (default 10)
+     */
+    @Bean
+    public GridOutcomePort gridOutcomePort(
+            @Value("${aether.flow.grid.callback-url:}") String callbackUrl,
+            @Value("${aether.flow.grid.callback-timeout-seconds:10}") long timeoutSeconds) {
+        if (callbackUrl == null || callbackUrl.isBlank()) {
+            return new LoggingGridOutcomeNotifier();
+        }
+        var requestFactory = new SimpleClientHttpRequestFactory();
+        requestFactory.setConnectTimeout(Duration.ofSeconds(timeoutSeconds));
+        requestFactory.setReadTimeout(Duration.ofSeconds(timeoutSeconds));
+        var restClient = RestClient.builder().requestFactory(requestFactory).build();
+        return new HttpGridOutcomeNotifier(callbackUrl, restClient);
+    }
+
+    /**
      * Creates the workflow orchestration engine (the process state machine).
      */
     @Bean
@@ -140,9 +167,10 @@ public class FlowApiConfig {
                                                  ApprovalTaskStore approvalTaskStore,
                                                  ApprovalNotificationPort notifier,
                                                  ApprovalMetricsPort metrics,
-                                                 SlaPolicyStore slaPolicyStore) {
+                                                 SlaPolicyStore slaPolicyStore,
+                                                 GridOutcomePort gridOutcomePort) {
         return new DefaultWorkflowOrchestrationService(definitionStore, instanceStore, approvalTaskStore,
-                notifier, metrics, slaPolicyStore);
+                notifier, metrics, slaPolicyStore, gridOutcomePort);
     }
 
     /**

@@ -65,7 +65,10 @@ ApprovalTask
   └── withdraw()                     → closed (no human decision) when its instance is cancelled
 
 DeferredDecision = (correlationId, tenantId, agentId, summary, confidence, requestedRole, receivedAt)
-                   — Grid's bounded DEFER projection; CONFIDENCE_GATE = 0.8
+                   — Grid's bounded (inbound) DEFER projection; CONFIDENCE_GATE = 0.8; WORKFLOW_KEY = "grid-deferral"
+
+DeferralOutcome = (correlationId, tenantId, decision (APPROVED|REJECTED), decidedBy, decidedAt)
+                   — the bounded (outbound) projection reported back to Grid once a human decides; no PII
 ```
 
 ### Ports
@@ -73,13 +76,14 @@ DeferredDecision = (correlationId, tenantId, agentId, summary, confidence, reque
 | Port | Implementation | Purpose |
 |---|---|---|
 | `WorkflowDefinitionStore` | `JdbcWorkflowDefinitionStore` | Persist/retrieve definitions (JSONB step graph); scoped |
-| `WorkflowInstanceStore` | `JdbcWorkflowInstanceStore` | Persist every instance transition; the durable state |
+| `WorkflowInstanceStore` | `JdbcWorkflowInstanceStore` | Persist every instance transition; the durable state; scoped lookups incl. `findByBusinessKey` (idempotent deferral intake) |
 | `ApprovalTaskStore` | `JdbcApprovalTaskStore` | Persist the human review queue; open-task lookups; breached-task batch + open count for the sweep |
 | `SlaPolicyStore` | `JdbcSlaPolicyStore` | Per-tenant SLA budget + escalation chain + optional business-hours calendar (upsert by tenant) |
 | `ApprovalNotificationPort` | `LoggingApprovalNotifier`, `WebhookApprovalNotifier`, `EmailApprovalNotifier`, `CompositeApprovalNotifier` | Reviewer notifications on task raise + escalation. Logging default is always on; config-gated best-effort webhook (`…webhook.url`) and email (`…email.to`, over `JavaMailSender`) sinks are fanned in via the composite when set. Each sink is best-effort — a transport failure never breaks task raising or the escalation sweep |
 | `ApprovalMetricsPort` | `MicrometerApprovalMetrics` (`NO_OP` default) | Operator counters over the approval lifecycle — `aether.flow.approvals.{raised,approved,rejected,reassigned}`. Framework-free port; the Micrometer adapter lives in the API module so the engine stays library-agnostic |
-| `WorkflowEnginePort` | `DefaultWorkflowOrchestrationService` | Start / advance instances; resume on approve/reject; **cancel** (stops the instance, withdraws its open task); notifies + meters on raise/approve/reject |
-| `ApprovalGatewayPort` | `DefaultApprovalGateway` | Grid DEFER → parked human-approval workflow; notifies + meters on raise |
+| `WorkflowEnginePort` | `DefaultWorkflowOrchestrationService` | Start / advance instances; resume on approve/reject; **cancel** (stops the instance, withdraws its open task); notifies + meters on raise/approve/reject; reports a `DeferralOutcome` back to Grid when a `grid-deferral` instance is decided |
+| `ApprovalGatewayPort` | `DefaultApprovalGateway` | Grid DEFER → parked human-approval workflow; **idempotent** (a re-delivered correlationId reuses the existing instance); notifies + meters on raise |
+| `GridOutcomePort` | `LoggingGridOutcomeNotifier` (default), `HttpGridOutcomeNotifier` (`NO_OP` fallback) | Closes the DEFER seam — reports the terminal human decision back to Grid, keyed by `correlationId`. Logging default keeps Flow standalone; config-gated best-effort HTTP callback (`aether.flow.grid.callback-url`) POSTs a bounded envelope — a failing callback never breaks the decision |
 | `SlaEscalationPort` | `SlaEscalationService` | Policy-driven sweep routing breached tasks up the tenant's escalation chain (reassign + fresh budget per level, computed via `SlaPolicy.deadlineFrom` so a business-hours calendar is honoured), or flagging ESCALATED when no chain |
 
 ---
@@ -127,10 +131,11 @@ Flow owns **no** vector store or embedding — the step graph is plain JSONB, ev
 3. Routing: a task at `escalation_level = L` whose policy chain has a role at `L` is **reassigned** to that role, flagged `ESCALATED`, given a **fresh SLA budget** (`default_sla_minutes`, computed via `SlaPolicy.deadlineFrom` so a business-hours calendar is honoured — the fresh deadline lands inside the tenant's working window, never overnight or across a weekend), and its level bumped — so a still-unactioned task climbs role → manager → executive across successive sweeps. When the chain is exhausted the task stays `ESCALATED` (visibility only). A tenant with no chain keeps the original behaviour: a breached `PENDING` task is flagged `ESCALATED` once. Escalation never decides — a human always does.
 4. Each escalation fires `ApprovalNotificationPort.notifyEscalated`. Micrometer: `aether.flow.escalation.escalated` counter, `aether.flow.approvals.open` gauge.
 
-### 5.5 Grid DEFER intake
+### 5.5 Grid DEFER intake — and the closed loop back
 1. Grid's confidence gate (`confidence < 0.8`) defers a decision and POSTs a bounded `DeferredDecision` to `/api/v1/deferrals`.
-2. `ApprovalGatewayPort.accept` ensures a canonical `grid-deferral` definition exists for the tenant, starts an instance, parks it at the review gate, and raises an `ApprovalTask` routed to `requestedRole`.
+2. `ApprovalGatewayPort.accept` is **idempotent**: it first looks up any existing instance for this `correlationId` (via `WorkflowInstanceStore.findByBusinessKey`) and reuses it if found — a retried DEFER never raises a second review. Otherwise it ensures a canonical `grid-deferral` definition exists for the tenant, starts an instance (business key = `correlationId`), parks it at the review gate, and raises an `ApprovalTask` routed to `requestedRole`.
 3. The reviewer's approve/reject on that task is the answer Grid awaits, correlated by `correlationId`.
+4. On that decision, the orchestration engine reports a bounded `DeferralOutcome` back to Grid through `GridOutcomePort` — keyed by `correlationId`, carrying only the terminal decision and decider. Best-effort and config-gated (`aether.flow.grid.callback-url`); a failing callback never blocks the decision, which is already durably recorded. This closes the loop Grid opened.
 
 ---
 

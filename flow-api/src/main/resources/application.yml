@@ -39,6 +39,10 @@ aether:
   flow:
     deferral:
       sla-minutes: ${FLOW_DEFERRAL_SLA_MINUTES:60}
+    grid:
+      # Config-gated best-effort callback to Grid on a resolved deferral. Blank → logging only (standalone).
+      callback-url: ${FLOW_GRID_CALLBACK_URL:}
+      callback-timeout-seconds: ${FLOW_GRID_CALLBACK_TIMEOUT_SECONDS:10}
     escalation:
       enabled: ${FLOW_ESCALATION_ENABLED:true}
       cron: ${FLOW_ESCALATION_CRON:0 */5 * * * *}

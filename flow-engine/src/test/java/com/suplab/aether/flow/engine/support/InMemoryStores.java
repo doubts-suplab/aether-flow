@@ -108,6 +108,15 @@ public final class InMemoryStores {
                     .count();
         }
 
+        @Override
+        public Optional<WorkflowInstance> findByBusinessKey(FlowScope scope, String businessKey) {
+            return byId.values().stream()
+                    .filter(i -> i.tenantId().equals(scope.tenantId())
+                            && i.workflowKey().equals(scope.workflowKey())
+                            && businessKey.equals(i.businessKey()))
+                    .max(Comparator.comparing(WorkflowInstance::startedAt));
+        }
+
         public int size() {
             return byId.size();
         }

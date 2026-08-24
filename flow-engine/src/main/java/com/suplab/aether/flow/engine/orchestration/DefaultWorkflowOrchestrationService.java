@@ -1,6 +1,8 @@
 package com.suplab.aether.flow.engine.orchestration;
 
 import com.suplab.aether.flow.domain.ApprovalTask;
+import com.suplab.aether.flow.domain.DeferralOutcome;
+import com.suplab.aether.flow.domain.DeferredDecision;
 import com.suplab.aether.flow.domain.FlowScope;
 import com.suplab.aether.flow.domain.SlaPolicy;
 import com.suplab.aether.flow.domain.WorkflowDefinition;
@@ -9,6 +11,7 @@ import com.suplab.aether.flow.domain.WorkflowStep;
 import com.suplab.aether.flow.ports.ApprovalMetricsPort;
 import com.suplab.aether.flow.ports.ApprovalNotificationPort;
 import com.suplab.aether.flow.ports.ApprovalTaskStore;
+import com.suplab.aether.flow.ports.GridOutcomePort;
 import com.suplab.aether.flow.ports.SlaPolicyStore;
 import com.suplab.aether.flow.ports.WorkflowDefinitionStore;
 import com.suplab.aether.flow.ports.WorkflowEnginePort;
@@ -45,6 +48,7 @@ public class DefaultWorkflowOrchestrationService implements WorkflowEnginePort {
     private final ApprovalNotificationPort notifier;
     private final ApprovalMetricsPort metrics;
     private final SlaPolicyStore policyStore;
+    private final GridOutcomePort gridOutcome;
 
     /** Convenience constructor without a metrics backend — records are no-ops. */
     public DefaultWorkflowOrchestrationService(WorkflowDefinitionStore definitionStore,
@@ -74,12 +78,33 @@ public class DefaultWorkflowOrchestrationService implements WorkflowEnginePort {
                                                ApprovalNotificationPort notifier,
                                                ApprovalMetricsPort metrics,
                                                SlaPolicyStore policyStore) {
+        this(definitionStore, instanceStore, approvalTaskStore, notifier, metrics, policyStore,
+                GridOutcomePort.NO_OP);
+    }
+
+    /**
+     * @param policyStore optional per-tenant SLA policy store; when present, a raised task's initial
+     *                    deadline is computed against the tenant's business-hours calendar (24/7 when
+     *                    the tenant has none). {@code null} preserves plain wall-clock deadlines.
+     * @param gridOutcome closes the Grid DEFER seam — when a decision resolves an instance of the
+     *                    canonical {@code grid-deferral} workflow, the terminal outcome is reported
+     *                    back to Grid (keyed by the deferral's {@code correlationId}). Best-effort;
+     *                    {@link GridOutcomePort#NO_OP} keeps Flow standalone.
+     */
+    public DefaultWorkflowOrchestrationService(WorkflowDefinitionStore definitionStore,
+                                               WorkflowInstanceStore instanceStore,
+                                               ApprovalTaskStore approvalTaskStore,
+                                               ApprovalNotificationPort notifier,
+                                               ApprovalMetricsPort metrics,
+                                               SlaPolicyStore policyStore,
+                                               GridOutcomePort gridOutcome) {
         this.definitionStore = definitionStore;
         this.instanceStore = instanceStore;
         this.approvalTaskStore = approvalTaskStore;
         this.notifier = notifier;
         this.metrics = metrics;
         this.policyStore = policyStore;
+        this.gridOutcome = gridOutcome;
     }
 
     @Override
@@ -110,6 +135,7 @@ public class DefaultWorkflowOrchestrationService implements WorkflowEnginePort {
         instanceStore.save(advanced);
         log.info("Approved taskId={} instanceId={} by={} advancing to step={}",
                 taskId, instance.id(), decidedBy, nextStep.key());
+        reportGridOutcome(instance, DeferralOutcome.APPROVED, decidedBy);
         return drive(advanced, definition);
     }
 
@@ -134,6 +160,7 @@ public class DefaultWorkflowOrchestrationService implements WorkflowEnginePort {
         var rejected = instance.reject();
         instanceStore.save(rejected);
         log.info("Rejected taskId={} instanceId={} by={} — instance stopped", taskId, instance.id(), decidedBy);
+        reportGridOutcome(instance, DeferralOutcome.REJECTED, decidedBy);
         return rejected;
     }
 
@@ -229,6 +256,27 @@ public class DefaultWorkflowOrchestrationService implements WorkflowEnginePort {
             notifier.notifyRaised(task);
         } catch (RuntimeException e) {
             log.warn("Raise notification failed for taskId={}: {}", task.id(), e.getMessage());
+        }
+    }
+
+    /**
+     * Closes the Grid DEFER seam when a decision terminates an instance of the canonical
+     * {@code grid-deferral} workflow: reports the terminal outcome back to Grid, keyed by the
+     * deferral's {@code correlationId} (the instance's business key). A no-op for every other
+     * workflow. Best-effort — the decision is already durably persisted, so a failing callback must
+     * never break the approve/reject path.
+     */
+    private void reportGridOutcome(WorkflowInstance instance, String decision, String decidedBy) {
+        if (!DeferredDecision.WORKFLOW_KEY.equals(instance.workflowKey()) || instance.businessKey() == null) {
+            return;
+        }
+        try {
+            gridOutcome.reportOutcome(
+                    new DeferralOutcome(instance.businessKey(), instance.tenantId(), decision, decidedBy,
+                            Instant.now()));
+        } catch (RuntimeException e) {
+            log.warn("Grid outcome callback failed for instanceId={} correlationId={}: {}",
+                    instance.id(), instance.businessKey(), e.getMessage());
         }
     }
 }

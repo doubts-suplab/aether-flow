@@ -5,15 +5,56 @@
 
 ---
 
-**Active Phase:** Phase 2 — Human Approval & SLA Governance ✅ core complete (SLA policy + chain escalation + reassignment + notifications incl. best-effort webhook + email sinks + operator lifecycle metrics + per-tenant business-hours calendars)
+**Active Phase:** Phase 3 — Grid Integration Deepening 🔄 (closed loop complete: idempotent deferral intake + correlation-keyed outcome callback to Grid)
 
 | Phase | Name | Status | Sessions |
 |---|---|---|---|
 | 0 | Scaffold | ✅ Complete | 1 |
 | 1 | Orchestration Engine Hardening | ✅ Complete | 2 |
 | 2 | Human Approval & SLA Governance | ✅ Core complete (policy + chains + reassign + notify + metrics + business hours) | 5 |
-| 3 | Grid Integration Deepening | ⏳ Planned | — |
+| 3 | Grid Integration Deepening | 🔄 Closed loop complete (idempotent intake + outcome callback); agent-step exec + GDPR erasure pending | 6 |
 | 4 | Kubernetes + Helm | ⏳ Planned | — |
+
+---
+
+## Phase 3 — Grid Integration Deepening 🔄 (session 6 — closed loop: idempotent intake + outcome callback)
+
+**Commit:** `feat(flow): close the Grid DEFER loop — idempotent intake + correlation-keyed outcome callback`
+
+Phase 2 completed human approval governance. Phase 3 closes the loop with Aether Grid's confidence
+gate: a deferral now flows *back* to Grid once a human decides, and a re-delivered deferral is a no-op.
+
+### What was done
+
+**Idempotent deferral intake:**
+- `WorkflowInstanceStore.findByBusinessKey(scope, businessKey)` — a scoped, most-recent lookup by the
+  instance's business key (added to the JDBC store and the in-memory test fake).
+- `DefaultApprovalGateway.accept` now checks for an existing instance under the deferral's
+  `correlationId` (the instance business key) before parking a new one. A retried DEFER reuses the
+  existing instance and never raises a second review. `DeferredDecision.WORKFLOW_KEY = "grid-deferral"`
+  is now the single canonical key for the deferral workflow.
+
+**Correlation-keyed outcome callback (the closing half of the seam):**
+- `DeferralOutcome` domain record — the bounded projection reported back to Grid (correlationId,
+  tenant, terminal `APPROVED`/`REJECTED`, decider, timestamp); no comment, request internals, or PII.
+- `GridOutcomePort` (domain) with a `NO_OP` default; `LoggingGridOutcomeNotifier` (standalone default)
+  and the config-gated best-effort `HttpGridOutcomeNotifier` (POSTs the bounded envelope when
+  `aether.flow.grid.callback-url` is set).
+- `DefaultWorkflowOrchestrationService` fires the callback on **approve** and on the **terminal
+  reject** path — but only for instances of the `grid-deferral` workflow (a normal workflow, or a
+  reject that routes to a rework branch, reports nothing). Best-effort: a failing callback is logged
+  and swallowed — the human decision is already durably persisted.
+
+### Constraints upheld
+- The outbound projection carries no Grid internals and no PII — same discipline as the inbound
+  `DeferredDecision`.
+- Escalation/decision semantics unchanged — Flow still never auto-decides; the callback only *reports*
+  a decision a human already made.
+- Flow still runs standalone: `NO_OP`/logging defaults mean no Grid need be present.
+
+### Verification
+- `mvn -DskipITs verify` green with the JaCoCo 80% gate; new unit tests cover idempotent intake,
+  outcome-fired-on-decide (approve + reject), the non-deferral-workflow no-op, and best-effort swallow.
 
 ---
 
