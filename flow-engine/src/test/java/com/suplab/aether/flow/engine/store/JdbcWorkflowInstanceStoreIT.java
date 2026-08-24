@@ -93,4 +93,37 @@ class JdbcWorkflowInstanceStoreIT {
 
         assertThat(store.findById(other, instance.id())).isEmpty();
     }
+
+    private static WorkflowInstance instanceWithBusinessKey(FlowScope scope, String businessKey) {
+        var def = WorkflowDefinition.create(scope, "WF", List.of(
+                WorkflowStep.humanApproval("review", "Review", 60, "reviewer", "finish"),
+                WorkflowStep.end("finish", "Done")));
+        return WorkflowInstance.start(def, businessKey);
+    }
+
+    @Test
+    void findByBusinessKey_returnsMostRecentMatchInScope() {
+        var scope = FlowScope.of("tenant-" + UUID.randomUUID(), "wf");
+        var instance = instanceWithBusinessKey(scope, "corr-1");
+        store.save(instance);
+
+        var found = store.findByBusinessKey(scope, "corr-1").orElseThrow();
+        assertThat(found.id()).isEqualTo(instance.id());
+        assertThat(store.findByBusinessKey(scope, "no-such-key")).isEmpty();
+    }
+
+    @Test
+    void deleteByBusinessKey_erasesMatchingInstancesInScopeOnly() {
+        var scope = FlowScope.of("tenant-" + UUID.randomUUID(), "wf");
+        var other = FlowScope.of(scope.tenantId(), "other-wf");
+        store.save(instanceWithBusinessKey(scope, "corr-1"));
+        store.save(instanceWithBusinessKey(other, "corr-1"));
+
+        int deleted = store.deleteByBusinessKey(scope, "corr-1");
+
+        assertThat(deleted).isEqualTo(1);
+        assertThat(store.findByBusinessKey(scope, "corr-1")).isEmpty();
+        // the other workflow key's instance under the same business key is untouched
+        assertThat(store.findByBusinessKey(other, "corr-1")).isPresent();
+    }
 }

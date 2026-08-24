@@ -65,4 +65,16 @@ class DefaultApprovalGatewayTest {
         assertThat(tasks.findOpenByInstance("acme", b.id()).orElseThrow().assignedRole())
                 .isEqualTo("legal");
     }
+
+    @Test
+    void accept_isIdempotentForARedeliveredCorrelationId() {
+        // Grid may retry the DEFER; a second delivery of the same correlationId must reuse the existing
+        // instance and never raise a second review.
+        var first = gateway.accept(decision("corr-1", "reviewer"));
+        var second = gateway.accept(decision("corr-1", "reviewer"));
+
+        assertThat(second.id()).isEqualTo(first.id());
+        assertThat(instances.size()).isEqualTo(1);
+        assertThat(tasks.all()).hasSize(1);
+    }
 }

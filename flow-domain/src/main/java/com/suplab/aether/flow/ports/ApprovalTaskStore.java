@@ -71,4 +71,15 @@ public interface ApprovalTaskStore {
      * @return the number of open tasks
      */
     long countOpen();
+
+    /**
+     * Permanently deletes every approval task raised for a workflow instance within a tenant — the
+     * approval-history half of a right-to-erasure request. Scoped by {@code tenantId} so there is no
+     * cross-tenant deletion path.
+     *
+     * @param tenantId   the owning tenant
+     * @param instanceId the workflow instance whose tasks are erased
+     * @return the number of tasks deleted
+     */
+    int deleteByInstance(String tenantId, UUID instanceId);
 }

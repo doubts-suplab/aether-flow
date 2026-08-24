@@ -1,14 +1,19 @@
 package com.suplab.aether.flow.engine.orchestration;
 
 import com.suplab.aether.flow.domain.ApprovalTask;
+import com.suplab.aether.flow.domain.DeferralOutcome;
+import com.suplab.aether.flow.domain.DeferredDecision;
 import com.suplab.aether.flow.domain.FlowScope;
 import com.suplab.aether.flow.domain.SlaPolicy;
 import com.suplab.aether.flow.domain.WorkflowDefinition;
+import com.suplab.aether.flow.domain.StepType;
 import com.suplab.aether.flow.domain.WorkflowInstance;
 import com.suplab.aether.flow.domain.WorkflowStep;
+import com.suplab.aether.flow.ports.AgentStepInvoker;
 import com.suplab.aether.flow.ports.ApprovalMetricsPort;
 import com.suplab.aether.flow.ports.ApprovalNotificationPort;
 import com.suplab.aether.flow.ports.ApprovalTaskStore;
+import com.suplab.aether.flow.ports.GridOutcomePort;
 import com.suplab.aether.flow.ports.SlaPolicyStore;
 import com.suplab.aether.flow.ports.WorkflowDefinitionStore;
 import com.suplab.aether.flow.ports.WorkflowEnginePort;
@@ -45,6 +50,8 @@ public class DefaultWorkflowOrchestrationService implements WorkflowEnginePort {
     private final ApprovalNotificationPort notifier;
     private final ApprovalMetricsPort metrics;
     private final SlaPolicyStore policyStore;
+    private final GridOutcomePort gridOutcome;
+    private final AgentStepInvoker agentInvoker;
 
     /** Convenience constructor without a metrics backend — records are no-ops. */
     public DefaultWorkflowOrchestrationService(WorkflowDefinitionStore definitionStore,
@@ -74,12 +81,50 @@ public class DefaultWorkflowOrchestrationService implements WorkflowEnginePort {
                                                ApprovalNotificationPort notifier,
                                                ApprovalMetricsPort metrics,
                                                SlaPolicyStore policyStore) {
+        this(definitionStore, instanceStore, approvalTaskStore, notifier, metrics, policyStore,
+                GridOutcomePort.NO_OP, AgentStepInvoker.NO_OP);
+    }
+
+    /** Convenience constructor without an agent invoker — AGENT steps advance like automated ones. */
+    public DefaultWorkflowOrchestrationService(WorkflowDefinitionStore definitionStore,
+                                               WorkflowInstanceStore instanceStore,
+                                               ApprovalTaskStore approvalTaskStore,
+                                               ApprovalNotificationPort notifier,
+                                               ApprovalMetricsPort metrics,
+                                               SlaPolicyStore policyStore,
+                                               GridOutcomePort gridOutcome) {
+        this(definitionStore, instanceStore, approvalTaskStore, notifier, metrics, policyStore,
+                gridOutcome, AgentStepInvoker.NO_OP);
+    }
+
+    /**
+     * @param policyStore  optional per-tenant SLA policy store; when present, a raised task's initial
+     *                     deadline is computed against the tenant's business-hours calendar (24/7 when
+     *                     the tenant has none). {@code null} preserves plain wall-clock deadlines.
+     * @param gridOutcome  closes the Grid DEFER seam — when a decision resolves an instance of the
+     *                     canonical {@code grid-deferral} workflow, the terminal outcome is reported
+     *                     back to Grid (keyed by the deferral's {@code correlationId}). Best-effort;
+     *                     {@link GridOutcomePort#NO_OP} keeps Flow standalone.
+     * @param agentInvoker invoked as an instance passes an {@code AGENT} step — best-effort
+     *                     augmentation that never parks or blocks; {@link AgentStepInvoker#NO_OP}
+     *                     keeps an AGENT step advancing like an automated one.
+     */
+    public DefaultWorkflowOrchestrationService(WorkflowDefinitionStore definitionStore,
+                                               WorkflowInstanceStore instanceStore,
+                                               ApprovalTaskStore approvalTaskStore,
+                                               ApprovalNotificationPort notifier,
+                                               ApprovalMetricsPort metrics,
+                                               SlaPolicyStore policyStore,
+                                               GridOutcomePort gridOutcome,
+                                               AgentStepInvoker agentInvoker) {
         this.definitionStore = definitionStore;
         this.instanceStore = instanceStore;
         this.approvalTaskStore = approvalTaskStore;
         this.notifier = notifier;
         this.metrics = metrics;
         this.policyStore = policyStore;
+        this.gridOutcome = gridOutcome;
+        this.agentInvoker = agentInvoker;
     }
 
     @Override
@@ -110,6 +155,7 @@ public class DefaultWorkflowOrchestrationService implements WorkflowEnginePort {
         instanceStore.save(advanced);
         log.info("Approved taskId={} instanceId={} by={} advancing to step={}",
                 taskId, instance.id(), decidedBy, nextStep.key());
+        reportGridOutcome(instance, DeferralOutcome.APPROVED, decidedBy);
         return drive(advanced, definition);
     }
 
@@ -134,6 +180,7 @@ public class DefaultWorkflowOrchestrationService implements WorkflowEnginePort {
         var rejected = instance.reject();
         instanceStore.save(rejected);
         log.info("Rejected taskId={} instanceId={} by={} — instance stopped", taskId, instance.id(), decidedBy);
+        reportGridOutcome(instance, DeferralOutcome.REJECTED, decidedBy);
         return rejected;
     }
 
@@ -178,6 +225,9 @@ public class DefaultWorkflowOrchestrationService implements WorkflowEnginePort {
                 instanceStore.save(completed);
                 log.info("Completed instanceId={} at step={}", completed.id(), step.key());
                 return completed;
+            }
+            if (step.type() == StepType.AGENT) {
+                invokeAgent(current, step);
             }
             var next = requireStep(definition, step.nextStepKey());
             current = current.moveTo(next);
@@ -229,6 +279,40 @@ public class DefaultWorkflowOrchestrationService implements WorkflowEnginePort {
             notifier.notifyRaised(task);
         } catch (RuntimeException e) {
             log.warn("Raise notification failed for taskId={}: {}", task.id(), e.getMessage());
+        }
+    }
+
+    /**
+     * Best-effort agent invocation as an instance passes an {@code AGENT} step — a failing or
+     * unreachable agent must never break workflow progression, so the step still advances.
+     */
+    private void invokeAgent(WorkflowInstance instance, WorkflowStep step) {
+        try {
+            agentInvoker.invoke(instance, step);
+        } catch (RuntimeException e) {
+            log.warn("Agent invocation failed for instanceId={} stepKey={}: {}",
+                    instance.id(), step.key(), e.getMessage());
+        }
+    }
+
+    /**
+     * Closes the Grid DEFER seam when a decision terminates an instance of the canonical
+     * {@code grid-deferral} workflow: reports the terminal outcome back to Grid, keyed by the
+     * deferral's {@code correlationId} (the instance's business key). A no-op for every other
+     * workflow. Best-effort — the decision is already durably persisted, so a failing callback must
+     * never break the approve/reject path.
+     */
+    private void reportGridOutcome(WorkflowInstance instance, String decision, String decidedBy) {
+        if (!DeferredDecision.WORKFLOW_KEY.equals(instance.workflowKey()) || instance.businessKey() == null) {
+            return;
+        }
+        try {
+            gridOutcome.reportOutcome(
+                    new DeferralOutcome(instance.businessKey(), instance.tenantId(), decision, decidedBy,
+                            Instant.now()));
+        } catch (RuntimeException e) {
+            log.warn("Grid outcome callback failed for instanceId={} correlationId={}: {}",
+                    instance.id(), instance.businessKey(), e.getMessage());
         }
     }
 }

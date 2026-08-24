@@ -59,16 +59,16 @@
 
 ---
 
-## Phase 3 — Grid Integration Deepening
+## Phase 3 — Grid Integration Deepening ✅ (core complete)
 
 **Goal:** A closed loop with Aether Grid's confidence gate.
 
 | Deliverable | Status |
 |---|---|
-| Outcome callback to Grid on deferral decision (correlation-keyed) | ⏳ |
-| Agent-step execution (invoke a Grid agent from an `AGENT` step) | ⏳ |
-| Idempotent deferral intake (dedupe by correlation id) | ⏳ |
-| GDPR erasure across instances and approval history | ⏳ |
+| Outcome callback to Grid on deferral decision (correlation-keyed) — `GridOutcomePort` (logging default + config-gated best-effort `HttpGridOutcomeNotifier`, `aether.flow.grid.callback-url`); fired on approve/reject of the canonical `grid-deferral` workflow | ✅ |
+| Idempotent deferral intake (dedupe by correlation id) — `WorkflowInstanceStore.findByBusinessKey`; a re-delivered `correlationId` reuses the existing instance, never raising a second review | ✅ |
+| Agent-step execution (invoke a Grid agent from an `AGENT` step) — `AgentStepInvoker` (NO_OP default + config-gated best-effort `HttpGridAgentInvoker`, `aether.flow.grid.agent-url`); invoked as the engine passes an `AGENT` step, best-effort (always advances) | ✅ |
+| GDPR erasure across instances and approval history — `ApprovalErasurePort` (`DefaultApprovalErasureService`) + `DELETE /api/v1/tenants/{tenantId}/deferrals/{correlationId}`; erases the deferral instance + its approval tasks, correlation-keyed and idempotent | ✅ |
 
 ---
 

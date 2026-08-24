@@ -40,7 +40,7 @@ public class DefaultApprovalGateway implements ApprovalGatewayPort {
     private static final Logger log = LoggerFactory.getLogger(DefaultApprovalGateway.class);
 
     /** Business key of the canonical single-approval workflow used for Grid deferrals. */
-    public static final String DEFERRAL_WORKFLOW_KEY = "grid-deferral";
+    public static final String DEFERRAL_WORKFLOW_KEY = DeferredDecision.WORKFLOW_KEY;
     private static final String REVIEW_STEP = "review";
     private static final String END_STEP = "resolved";
 
@@ -97,6 +97,16 @@ public class DefaultApprovalGateway implements ApprovalGatewayPort {
     @Override
     public WorkflowInstance accept(DeferredDecision decision) {
         var scope = FlowScope.of(decision.tenantId(), DEFERRAL_WORKFLOW_KEY);
+
+        // Idempotent intake: a re-delivered correlation id must not raise a second review. If an
+        // instance already exists for this deferral, return it unchanged (Grid may retry the DEFER).
+        var existing = instanceStore.findByBusinessKey(scope, decision.correlationId());
+        if (existing.isPresent()) {
+            log.info("Duplicate Grid deferral correlationId={} tenantId={} -> reusing instanceId={} (idempotent)",
+                    decision.correlationId(), decision.tenantId(), existing.get().id());
+            return existing.get();
+        }
+
         var definition = definitionStore.findActive(scope).orElseGet(() -> createCanonicalDefinition(scope));
 
         var reviewStep = definition.startStep();

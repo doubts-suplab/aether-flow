@@ -143,6 +143,20 @@ public class JdbcApprovalTaskStore implements ApprovalTaskStore {
         return count != null ? count : 0L;
     }
 
+    @Override
+    public int deleteByInstance(String tenantId, UUID instanceId) {
+        var sql = """
+                DELETE FROM approval_tasks
+                WHERE tenant_id = :tenantId AND instance_id = :instanceId
+                """;
+        var params = new MapSqlParameterSource()
+                .addValue("tenantId", tenantId)
+                .addValue("instanceId", instanceId);
+        int deleted = jdbc.update(sql, params);
+        log.info("Erased {} approval task(s) tenantId={} instanceId={}", deleted, tenantId, instanceId);
+        return deleted;
+    }
+
     private ApprovalTask mapRow(ResultSet rs, int row) throws SQLException {
         Timestamp decidedAt = rs.getTimestamp("decided_at");
         return new ApprovalTask(

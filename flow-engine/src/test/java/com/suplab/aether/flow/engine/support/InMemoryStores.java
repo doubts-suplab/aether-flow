@@ -108,6 +108,26 @@ public final class InMemoryStores {
                     .count();
         }
 
+        @Override
+        public Optional<WorkflowInstance> findByBusinessKey(FlowScope scope, String businessKey) {
+            return byId.values().stream()
+                    .filter(i -> i.tenantId().equals(scope.tenantId())
+                            && i.workflowKey().equals(scope.workflowKey())
+                            && businessKey.equals(i.businessKey()))
+                    .max(Comparator.comparing(WorkflowInstance::startedAt));
+        }
+
+        @Override
+        public int deleteByBusinessKey(FlowScope scope, String businessKey) {
+            var toDelete = byId.values().stream()
+                    .filter(i -> i.tenantId().equals(scope.tenantId())
+                            && i.workflowKey().equals(scope.workflowKey())
+                            && businessKey.equals(i.businessKey()))
+                    .toList();
+            toDelete.forEach(i -> byId.remove(i.id()));
+            return toDelete.size();
+        }
+
         public int size() {
             return byId.size();
         }
@@ -155,6 +175,15 @@ public final class InMemoryStores {
         @Override
         public long countOpen() {
             return byId.values().stream().filter(t -> t.outcome().isOpen()).count();
+        }
+
+        @Override
+        public int deleteByInstance(String tenantId, UUID instanceId) {
+            var toDelete = byId.values().stream()
+                    .filter(t -> t.tenantId().equals(tenantId) && t.instanceId().equals(instanceId))
+                    .toList();
+            toDelete.forEach(t -> byId.remove(t.id()));
+            return toDelete.size();
         }
 
         public List<ApprovalTask> all() {

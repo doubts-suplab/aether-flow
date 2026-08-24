@@ -128,6 +128,39 @@ public class JdbcWorkflowInstanceStore implements WorkflowInstanceStore {
         return count != null ? count : 0L;
     }
 
+    @Override
+    public Optional<WorkflowInstance> findByBusinessKey(FlowScope scope, String businessKey) {
+        var sql = """
+                SELECT id, tenant_id, workflow_key, definition_version, business_key, current_step_key,
+                       status, started_at, updated_at, completed_at
+                FROM workflow_instances
+                WHERE tenant_id = :tenantId AND workflow_key = :workflowKey AND business_key = :businessKey
+                ORDER BY started_at DESC
+                LIMIT 1
+                """;
+        var params = new MapSqlParameterSource()
+                .addValue("tenantId", scope.tenantId())
+                .addValue("workflowKey", scope.workflowKey())
+                .addValue("businessKey", businessKey);
+        return jdbc.query(sql, params, this::mapRow).stream().findFirst();
+    }
+
+    @Override
+    public int deleteByBusinessKey(FlowScope scope, String businessKey) {
+        var sql = """
+                DELETE FROM workflow_instances
+                WHERE tenant_id = :tenantId AND workflow_key = :workflowKey AND business_key = :businessKey
+                """;
+        var params = new MapSqlParameterSource()
+                .addValue("tenantId", scope.tenantId())
+                .addValue("workflowKey", scope.workflowKey())
+                .addValue("businessKey", businessKey);
+        int deleted = jdbc.update(sql, params);
+        log.info("Erased {} instance(s) tenantId={} workflowKey={} businessKey={}",
+                deleted, scope.tenantId(), scope.workflowKey(), businessKey);
+        return deleted;
+    }
+
     private WorkflowInstance mapRow(ResultSet rs, int row) throws SQLException {
         Timestamp completedAt = rs.getTimestamp("completed_at");
         return new WorkflowInstance(

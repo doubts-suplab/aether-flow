@@ -62,4 +62,27 @@ public interface WorkflowInstanceStore {
      * @return non-negative instance count
      */
     long countByStatus(FlowScope scope, WorkflowStatus status);
+
+    /**
+     * Looks up the most recently created instance carrying a given {@code businessKey} within a scope
+     * — the correlation key an upstream caller supplied (e.g. a Grid deferral's correlation id). Used
+     * to make deferral intake idempotent: a re-delivered correlation id resolves to the existing
+     * instance rather than starting a duplicate.
+     *
+     * @param scope       the owning tenant + workflow key
+     * @param businessKey the correlation key to match (never blank)
+     * @return the matching instance if present, otherwise empty
+     */
+    Optional<WorkflowInstance> findByBusinessKey(FlowScope scope, String businessKey);
+
+    /**
+     * Permanently deletes every instance carrying a given {@code businessKey} within a scope — the
+     * instance half of a right-to-erasure request (e.g. erasing a Grid deferral by correlation id).
+     * Scoped by tenant + workflow key so there is no cross-tenant deletion path.
+     *
+     * @param scope       the owning tenant + workflow key
+     * @param businessKey the correlation key to match (never blank)
+     * @return the number of instances deleted
+     */
+    int deleteByBusinessKey(FlowScope scope, String businessKey);
 }

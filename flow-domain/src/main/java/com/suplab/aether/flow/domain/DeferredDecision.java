@@ -37,6 +37,13 @@ public record DeferredDecision(
     /** Grid's confidence gate: decisions at or above this confidence are not deferred. */
     public static final double CONFIDENCE_GATE = 0.8;
 
+    /**
+     * Business key of the canonical single-approval workflow Flow parks a deferral in. The
+     * {@code businessKey} of such an instance is the deferral's {@code correlationId} — the key both
+     * for idempotent intake and for reporting the human outcome back to Grid.
+     */
+    public static final String WORKFLOW_KEY = "grid-deferral";
+
     public DeferredDecision {
         if (correlationId == null || correlationId.isBlank())
             throw new IllegalArgumentException("correlationId required");
