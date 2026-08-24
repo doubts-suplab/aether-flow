@@ -118,4 +118,20 @@ class JdbcApprovalTaskStoreIT {
         assertThat(store.findOpenByInstance(tenant, task.instanceId())).map(ApprovalTask::id)
                 .contains(task.id());
     }
+
+    @Test
+    void deleteByInstance_erasesTasksForThatInstanceAndTenantOnly() {
+        var tenant = "tenant-" + UUID.randomUUID();
+        var task = raiseTaskFor(tenant, "reviewer");
+        store.save(task);
+
+        // a different tenant must not erase this tenant's tasks
+        assertThat(store.deleteByInstance("other-tenant", task.instanceId())).isZero();
+        assertThat(store.findById(tenant, task.id())).isPresent();
+
+        int deleted = store.deleteByInstance(tenant, task.instanceId());
+
+        assertThat(deleted).isEqualTo(1);
+        assertThat(store.findById(tenant, task.id())).isEmpty();
+    }
 }

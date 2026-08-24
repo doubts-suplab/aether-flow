@@ -176,6 +176,47 @@ class DefaultWorkflowOrchestrationServiceTest {
         assertThat(metrics.rejected).isEqualTo(1);
     }
 
+    private static final class RecordingAgentInvoker implements com.suplab.aether.flow.ports.AgentStepInvoker {
+        final List<String> invokedSteps = new java.util.ArrayList<>();
+        @Override public void invoke(WorkflowInstance instance, WorkflowStep step) {
+            invokedSteps.add(step.key());
+        }
+    }
+
+    @Test
+    void agentStepInvokesTheAgentThenAdvances() {
+        var agent = new RecordingAgentInvoker();
+        var agentEngine = new DefaultWorkflowOrchestrationService(definitions, instances, tasks,
+                new com.suplab.aether.flow.engine.notification.LoggingApprovalNotifier(),
+                ApprovalMetricsPort.NO_OP, null, com.suplab.aether.flow.ports.GridOutcomePort.NO_OP, agent);
+        definitions.save(WorkflowDefinition.create(SCOPE, "Agent Flow", List.of(
+                WorkflowStep.agent("enrich", "Enrich via agent", "finish"),
+                WorkflowStep.end("finish", "Done"))));
+
+        var completed = agentEngine.start(SCOPE, "INV-AGENT");
+
+        // The agent was invoked for the AGENT step, and the instance still advanced to completion.
+        assertThat(agent.invokedSteps).containsExactly("enrich");
+        assertThat(completed.status()).isEqualTo(WorkflowStatus.COMPLETED);
+    }
+
+    @Test
+    void aFailingAgentNeverBlocksProgression() {
+        com.suplab.aether.flow.ports.AgentStepInvoker exploding = (i, s) -> {
+            throw new RuntimeException("agent unreachable");
+        };
+        var agentEngine = new DefaultWorkflowOrchestrationService(definitions, instances, tasks,
+                new com.suplab.aether.flow.engine.notification.LoggingApprovalNotifier(),
+                ApprovalMetricsPort.NO_OP, null, com.suplab.aether.flow.ports.GridOutcomePort.NO_OP, exploding);
+        definitions.save(WorkflowDefinition.create(SCOPE, "Agent Flow", List.of(
+                WorkflowStep.agent("enrich", "Enrich via agent", "finish"),
+                WorkflowStep.end("finish", "Done"))));
+
+        var completed = agentEngine.start(SCOPE, "INV-AGENT");
+
+        assertThat(completed.status()).isEqualTo(WorkflowStatus.COMPLETED);
+    }
+
     private WorkflowDefinition deferralWorkflow() {
         // Mirrors the canonical grid-deferral definition: a single human review then END.
         return WorkflowDefinition.create(FlowScope.of("acme", DeferredDecision.WORKFLOW_KEY),

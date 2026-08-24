@@ -44,7 +44,8 @@ cd ../.. && mvn spring-boot:run -pl flow-api
 | `POST` | `/api/v1/tenants/{tenantId}/approvals/{taskId}/reject` | Reject — stop the instance |
 | `POST` | `/api/v1/tenants/{tenantId}/approvals/{taskId}/reassign` | Delegate an open task to another role |
 | `GET`/`PUT` | `/api/v1/tenants/{tenantId}/sla-policy` | Per-tenant SLA budget + escalation chain + optional business-hours calendar (SLA budgets consume working time only) |
-| `POST` | `/api/v1/deferrals` | Aether Grid DEFER intake → human-approval workflow |
+| `POST` | `/api/v1/deferrals` | Aether Grid DEFER intake → human-approval workflow (idempotent by correlation id) |
+| `DELETE` | `/api/v1/tenants/{tenantId}/deferrals/{correlationId}` | Right-to-erasure — erase a deferral instance + its approval history (GDPR Art. 17) |
 | `GET` | `/actuator/health` | Liveness + readiness probes |
 
 ## Workflow Model
@@ -76,6 +77,8 @@ When Aether Grid's confidence gate (`confidence < 0.8`) defers an agent decision
 
 Intake is **idempotent** — a re-delivered `correlationId` reuses the existing instance and never raises a second review. Once the reviewer decides, Flow **closes the loop**: it reports a bounded `DeferralOutcome` (the terminal `APPROVED`/`REJECTED`, keyed by `correlationId`) back to Grid through `GridOutcomePort`. The callback is config-gated (`FLOW_GRID_CALLBACK_URL`) and best-effort — a failing callback never blocks the decision, which is already durably recorded; with no URL configured Flow just logs the outcome and runs fully standalone.
 
+An `AGENT` step invokes a Grid agent through `AgentStepInvoker` as the engine passes it, then advances regardless — best-effort augmentation, never a park or a gate (config-gated via `FLOW_GRID_AGENT_URL`; a no-op by default). And a specific deferral can be **erased** on a right-to-erasure request (GDPR Art. 17): `DELETE /api/v1/tenants/{tenantId}/deferrals/{correlationId}` removes the deferral instance and its approval history, correlation-keyed, tenant-scoped, and idempotent.
+
 ## Ecosystem
 
 ```
@@ -102,6 +105,8 @@ Aether Flow owns the **Workflows** capability exclusively. Memory stays in Core/
 | `FLOW_DEFERRAL_SLA_MINUTES` | `60` | SLA budget for a Grid deferral's approval task |
 | `FLOW_GRID_CALLBACK_URL` | *(unset)* | Grid callback endpoint for a resolved deferral's outcome — when set, a best-effort HTTP notifier POSTs the correlation-keyed `DeferralOutcome` back to Grid (blank → logging only, fully standalone) |
 | `FLOW_GRID_CALLBACK_TIMEOUT_SECONDS` | `10` | Per-request connect/read timeout for the Grid outcome callback |
+| `FLOW_GRID_AGENT_URL` | *(unset)* | Grid agent endpoint invoked as an instance passes an `AGENT` step — when set, a best-effort HTTP invoker POSTs a bounded routing envelope (blank → no-op, AGENT steps advance like automated) |
+| `FLOW_GRID_AGENT_TIMEOUT_SECONDS` | `10` | Per-request connect/read timeout for the Grid agent invocation |
 | `FLOW_ESCALATION_ENABLED` | `true` | Toggle the scheduled SLA escalation sweep |
 | `FLOW_ESCALATION_CRON` | `0 */5 * * * *` | Escalation sweep schedule |
 | `FLOW_NOTIFICATION_WEBHOOK_URL` | *(unset)* | HTTP sink for approval raise/escalation signals — when set, a best-effort webhook notifier is fanned in alongside the logging sink (blank → logging only) |

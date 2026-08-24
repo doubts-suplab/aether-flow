@@ -78,6 +78,15 @@ public record WorkflowStep(
     }
 
     /**
+     * Factory for an AI-agent step. The engine invokes the configured agent adapter as best-effort
+     * augmentation and then advances to {@code nextStepKey} regardless of the outcome — an agent step
+     * never parks the instance for a human.
+     */
+    public static WorkflowStep agent(String key, String name, String nextStepKey) {
+        return new WorkflowStep(key, name, StepType.AGENT, 0, null, nextStepKey, null);
+    }
+
+    /**
      * Factory for the terminal step.
      */
     public static WorkflowStep end(String key, String name) {

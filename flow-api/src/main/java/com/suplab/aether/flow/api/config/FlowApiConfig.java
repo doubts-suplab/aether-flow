@@ -1,8 +1,10 @@
 package com.suplab.aether.flow.api.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.suplab.aether.flow.engine.erasure.DefaultApprovalErasureService;
 import com.suplab.aether.flow.engine.escalation.SlaEscalationService;
 import com.suplab.aether.flow.engine.gateway.DefaultApprovalGateway;
+import com.suplab.aether.flow.engine.gateway.HttpGridAgentInvoker;
 import com.suplab.aether.flow.engine.gateway.HttpGridOutcomeNotifier;
 import com.suplab.aether.flow.engine.gateway.LoggingGridOutcomeNotifier;
 import com.suplab.aether.flow.engine.notification.CompositeApprovalNotifier;
@@ -15,6 +17,8 @@ import com.suplab.aether.flow.engine.store.JdbcSlaPolicyStore;
 import com.suplab.aether.flow.engine.store.JdbcWorkflowDefinitionStore;
 import com.suplab.aether.flow.engine.store.JdbcWorkflowInstanceStore;
 import com.suplab.aether.flow.api.metrics.MicrometerApprovalMetrics;
+import com.suplab.aether.flow.ports.AgentStepInvoker;
+import com.suplab.aether.flow.ports.ApprovalErasurePort;
 import com.suplab.aether.flow.ports.ApprovalGatewayPort;
 import com.suplab.aether.flow.ports.ApprovalMetricsPort;
 import com.suplab.aether.flow.ports.ApprovalNotificationPort;
@@ -159,6 +163,29 @@ public class FlowApiConfig {
     }
 
     /**
+     * Creates the agent-step invoker — Flow's outbound agent seam. The {@link AgentStepInvoker#NO_OP}
+     * default keeps Flow standalone (an AGENT step advances like an automated one); when
+     * {@code aether.flow.grid.agent-url} is set, a best-effort {@link HttpGridAgentInvoker} POSTs a
+     * bounded routing envelope to a Grid agent endpoint as the instance passes the step.
+     *
+     * @param agentUrl       optional Grid agent endpoint for AGENT steps (blank → no-op)
+     * @param timeoutSeconds per-request connect/read timeout for the agent call (default 10)
+     */
+    @Bean
+    public AgentStepInvoker agentStepInvoker(
+            @Value("${aether.flow.grid.agent-url:}") String agentUrl,
+            @Value("${aether.flow.grid.agent-timeout-seconds:10}") long timeoutSeconds) {
+        if (agentUrl == null || agentUrl.isBlank()) {
+            return AgentStepInvoker.NO_OP;
+        }
+        var requestFactory = new SimpleClientHttpRequestFactory();
+        requestFactory.setConnectTimeout(Duration.ofSeconds(timeoutSeconds));
+        requestFactory.setReadTimeout(Duration.ofSeconds(timeoutSeconds));
+        var restClient = RestClient.builder().requestFactory(requestFactory).build();
+        return new HttpGridAgentInvoker(agentUrl, restClient);
+    }
+
+    /**
      * Creates the workflow orchestration engine (the process state machine).
      */
     @Bean
@@ -168,9 +195,20 @@ public class FlowApiConfig {
                                                  ApprovalNotificationPort notifier,
                                                  ApprovalMetricsPort metrics,
                                                  SlaPolicyStore slaPolicyStore,
-                                                 GridOutcomePort gridOutcomePort) {
+                                                 GridOutcomePort gridOutcomePort,
+                                                 AgentStepInvoker agentStepInvoker) {
         return new DefaultWorkflowOrchestrationService(definitionStore, instanceStore, approvalTaskStore,
-                notifier, metrics, slaPolicyStore, gridOutcomePort);
+                notifier, metrics, slaPolicyStore, gridOutcomePort, agentStepInvoker);
+    }
+
+    /**
+     * Creates the deferral erasure service — right-to-erasure (GDPR Art. 17) for a Grid deferral and
+     * its approval history, keyed by correlation id and scoped to a tenant.
+     */
+    @Bean
+    public ApprovalErasurePort approvalErasurePort(WorkflowInstanceStore instanceStore,
+                                                   ApprovalTaskStore approvalTaskStore) {
+        return new DefaultApprovalErasureService(instanceStore, approvalTaskStore);
     }
 
     /**

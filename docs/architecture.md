@@ -69,6 +69,9 @@ DeferredDecision = (correlationId, tenantId, agentId, summary, confidence, reque
 
 DeferralOutcome = (correlationId, tenantId, decision (APPROVED|REJECTED), decidedBy, decidedAt)
                    — the bounded (outbound) projection reported back to Grid once a human decides; no PII
+
+DeferralErasureResult = (correlationId, tenantId, instancesErased, tasksErased)
+                   — counts removed by a right-to-erasure request (GDPR Art. 17), per correlation
 ```
 
 ### Ports
@@ -76,14 +79,16 @@ DeferralOutcome = (correlationId, tenantId, decision (APPROVED|REJECTED), decide
 | Port | Implementation | Purpose |
 |---|---|---|
 | `WorkflowDefinitionStore` | `JdbcWorkflowDefinitionStore` | Persist/retrieve definitions (JSONB step graph); scoped |
-| `WorkflowInstanceStore` | `JdbcWorkflowInstanceStore` | Persist every instance transition; the durable state; scoped lookups incl. `findByBusinessKey` (idempotent deferral intake) |
-| `ApprovalTaskStore` | `JdbcApprovalTaskStore` | Persist the human review queue; open-task lookups; breached-task batch + open count for the sweep |
+| `WorkflowInstanceStore` | `JdbcWorkflowInstanceStore` | Persist every instance transition; the durable state; scoped lookups incl. `findByBusinessKey` (idempotent deferral intake) + `deleteByBusinessKey` (erasure) |
+| `ApprovalTaskStore` | `JdbcApprovalTaskStore` | Persist the human review queue; open-task lookups; breached-task batch + open count for the sweep; `deleteByInstance` (erasure) |
 | `SlaPolicyStore` | `JdbcSlaPolicyStore` | Per-tenant SLA budget + escalation chain + optional business-hours calendar (upsert by tenant) |
 | `ApprovalNotificationPort` | `LoggingApprovalNotifier`, `WebhookApprovalNotifier`, `EmailApprovalNotifier`, `CompositeApprovalNotifier` | Reviewer notifications on task raise + escalation. Logging default is always on; config-gated best-effort webhook (`…webhook.url`) and email (`…email.to`, over `JavaMailSender`) sinks are fanned in via the composite when set. Each sink is best-effort — a transport failure never breaks task raising or the escalation sweep |
 | `ApprovalMetricsPort` | `MicrometerApprovalMetrics` (`NO_OP` default) | Operator counters over the approval lifecycle — `aether.flow.approvals.{raised,approved,rejected,reassigned}`. Framework-free port; the Micrometer adapter lives in the API module so the engine stays library-agnostic |
-| `WorkflowEnginePort` | `DefaultWorkflowOrchestrationService` | Start / advance instances; resume on approve/reject; **cancel** (stops the instance, withdraws its open task); notifies + meters on raise/approve/reject; reports a `DeferralOutcome` back to Grid when a `grid-deferral` instance is decided |
+| `WorkflowEnginePort` | `DefaultWorkflowOrchestrationService` | Start / advance instances; resume on approve/reject; **cancel** (stops the instance, withdraws its open task); invokes the agent (best-effort) on `AGENT` steps; notifies + meters on raise/approve/reject; reports a `DeferralOutcome` back to Grid when a `grid-deferral` instance is decided |
 | `ApprovalGatewayPort` | `DefaultApprovalGateway` | Grid DEFER → parked human-approval workflow; **idempotent** (a re-delivered correlationId reuses the existing instance); notifies + meters on raise |
 | `GridOutcomePort` | `LoggingGridOutcomeNotifier` (default), `HttpGridOutcomeNotifier` (`NO_OP` fallback) | Closes the DEFER seam — reports the terminal human decision back to Grid, keyed by `correlationId`. Logging default keeps Flow standalone; config-gated best-effort HTTP callback (`aether.flow.grid.callback-url`) POSTs a bounded envelope — a failing callback never breaks the decision |
+| `AgentStepInvoker` | `HttpGridAgentInvoker` (`NO_OP` default) | Invokes a Grid agent as the engine passes an `AGENT` step — best-effort augmentation that always advances. Config-gated (`aether.flow.grid.agent-url`) best-effort POST of a bounded routing envelope; NO_OP keeps an AGENT step advancing like an automated one |
+| `ApprovalErasurePort` | `DefaultApprovalErasureService` | Right-to-erasure (GDPR Art. 17) — erases a deferral instance + its approval tasks by `correlationId` within a tenant; deletes child tasks first, reports counts, idempotent. Backed by `ApprovalTaskStore.deleteByInstance` + `WorkflowInstanceStore.deleteByBusinessKey` |
 | `SlaEscalationPort` | `SlaEscalationService` | Policy-driven sweep routing breached tasks up the tenant's escalation chain (reassign + fresh budget per level, computed via `SlaPolicy.deadlineFrom` so a business-hours calendar is honoured), or flagging ESCALATED when no chain |
 
 ---
@@ -136,6 +141,14 @@ Flow owns **no** vector store or embedding — the step graph is plain JSONB, ev
 2. `ApprovalGatewayPort.accept` is **idempotent**: it first looks up any existing instance for this `correlationId` (via `WorkflowInstanceStore.findByBusinessKey`) and reuses it if found — a retried DEFER never raises a second review. Otherwise it ensures a canonical `grid-deferral` definition exists for the tenant, starts an instance (business key = `correlationId`), parks it at the review gate, and raises an `ApprovalTask` routed to `requestedRole`.
 3. The reviewer's approve/reject on that task is the answer Grid awaits, correlated by `correlationId`.
 4. On that decision, the orchestration engine reports a bounded `DeferralOutcome` back to Grid through `GridOutcomePort` — keyed by `correlationId`, carrying only the terminal decision and decider. Best-effort and config-gated (`aether.flow.grid.callback-url`); a failing callback never blocks the decision, which is already durably recorded. This closes the loop Grid opened.
+
+### 5.6 Agent-step execution
+1. As `drive()` passes an `AGENT` step, the engine invokes `AgentStepInvoker.invoke(instance, step)` and then advances to the step's successor — an agent step is best-effort augmentation, never a park or a gate.
+2. The `NO_OP` default advances the step like an automated one (Flow standalone). When `aether.flow.grid.agent-url` is set, `HttpGridAgentInvoker` POSTs a bounded routing envelope (tenant, workflow/business/step keys — no PII). Any failure is logged and swallowed so progression is never blocked.
+
+### 5.7 Right to erasure (GDPR Art. 17)
+1. `DELETE /api/v1/tenants/{tenantId}/deferrals/{correlationId}` → `ApprovalErasurePort.eraseDeferral`.
+2. Within the tenant's `grid-deferral` scope it deletes the deferral's approval tasks first (child rows), then the instance, and returns the counts removed. Per-correlation and idempotent (a correlation with nothing to erase → 404). Erasure is tenant-scoped — no cross-tenant deletion path.
 
 ---
 

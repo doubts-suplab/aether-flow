@@ -6,8 +6,10 @@ import com.suplab.aether.flow.domain.DeferredDecision;
 import com.suplab.aether.flow.domain.FlowScope;
 import com.suplab.aether.flow.domain.SlaPolicy;
 import com.suplab.aether.flow.domain.WorkflowDefinition;
+import com.suplab.aether.flow.domain.StepType;
 import com.suplab.aether.flow.domain.WorkflowInstance;
 import com.suplab.aether.flow.domain.WorkflowStep;
+import com.suplab.aether.flow.ports.AgentStepInvoker;
 import com.suplab.aether.flow.ports.ApprovalMetricsPort;
 import com.suplab.aether.flow.ports.ApprovalNotificationPort;
 import com.suplab.aether.flow.ports.ApprovalTaskStore;
@@ -49,6 +51,7 @@ public class DefaultWorkflowOrchestrationService implements WorkflowEnginePort {
     private final ApprovalMetricsPort metrics;
     private final SlaPolicyStore policyStore;
     private final GridOutcomePort gridOutcome;
+    private final AgentStepInvoker agentInvoker;
 
     /** Convenience constructor without a metrics backend — records are no-ops. */
     public DefaultWorkflowOrchestrationService(WorkflowDefinitionStore definitionStore,
@@ -79,18 +82,10 @@ public class DefaultWorkflowOrchestrationService implements WorkflowEnginePort {
                                                ApprovalMetricsPort metrics,
                                                SlaPolicyStore policyStore) {
         this(definitionStore, instanceStore, approvalTaskStore, notifier, metrics, policyStore,
-                GridOutcomePort.NO_OP);
+                GridOutcomePort.NO_OP, AgentStepInvoker.NO_OP);
     }
 
-    /**
-     * @param policyStore optional per-tenant SLA policy store; when present, a raised task's initial
-     *                    deadline is computed against the tenant's business-hours calendar (24/7 when
-     *                    the tenant has none). {@code null} preserves plain wall-clock deadlines.
-     * @param gridOutcome closes the Grid DEFER seam — when a decision resolves an instance of the
-     *                    canonical {@code grid-deferral} workflow, the terminal outcome is reported
-     *                    back to Grid (keyed by the deferral's {@code correlationId}). Best-effort;
-     *                    {@link GridOutcomePort#NO_OP} keeps Flow standalone.
-     */
+    /** Convenience constructor without an agent invoker — AGENT steps advance like automated ones. */
     public DefaultWorkflowOrchestrationService(WorkflowDefinitionStore definitionStore,
                                                WorkflowInstanceStore instanceStore,
                                                ApprovalTaskStore approvalTaskStore,
@@ -98,6 +93,30 @@ public class DefaultWorkflowOrchestrationService implements WorkflowEnginePort {
                                                ApprovalMetricsPort metrics,
                                                SlaPolicyStore policyStore,
                                                GridOutcomePort gridOutcome) {
+        this(definitionStore, instanceStore, approvalTaskStore, notifier, metrics, policyStore,
+                gridOutcome, AgentStepInvoker.NO_OP);
+    }
+
+    /**
+     * @param policyStore  optional per-tenant SLA policy store; when present, a raised task's initial
+     *                     deadline is computed against the tenant's business-hours calendar (24/7 when
+     *                     the tenant has none). {@code null} preserves plain wall-clock deadlines.
+     * @param gridOutcome  closes the Grid DEFER seam — when a decision resolves an instance of the
+     *                     canonical {@code grid-deferral} workflow, the terminal outcome is reported
+     *                     back to Grid (keyed by the deferral's {@code correlationId}). Best-effort;
+     *                     {@link GridOutcomePort#NO_OP} keeps Flow standalone.
+     * @param agentInvoker invoked as an instance passes an {@code AGENT} step — best-effort
+     *                     augmentation that never parks or blocks; {@link AgentStepInvoker#NO_OP}
+     *                     keeps an AGENT step advancing like an automated one.
+     */
+    public DefaultWorkflowOrchestrationService(WorkflowDefinitionStore definitionStore,
+                                               WorkflowInstanceStore instanceStore,
+                                               ApprovalTaskStore approvalTaskStore,
+                                               ApprovalNotificationPort notifier,
+                                               ApprovalMetricsPort metrics,
+                                               SlaPolicyStore policyStore,
+                                               GridOutcomePort gridOutcome,
+                                               AgentStepInvoker agentInvoker) {
         this.definitionStore = definitionStore;
         this.instanceStore = instanceStore;
         this.approvalTaskStore = approvalTaskStore;
@@ -105,6 +124,7 @@ public class DefaultWorkflowOrchestrationService implements WorkflowEnginePort {
         this.metrics = metrics;
         this.policyStore = policyStore;
         this.gridOutcome = gridOutcome;
+        this.agentInvoker = agentInvoker;
     }
 
     @Override
@@ -206,6 +226,9 @@ public class DefaultWorkflowOrchestrationService implements WorkflowEnginePort {
                 log.info("Completed instanceId={} at step={}", completed.id(), step.key());
                 return completed;
             }
+            if (step.type() == StepType.AGENT) {
+                invokeAgent(current, step);
+            }
             var next = requireStep(definition, step.nextStepKey());
             current = current.moveTo(next);
             instanceStore.save(current);
@@ -256,6 +279,19 @@ public class DefaultWorkflowOrchestrationService implements WorkflowEnginePort {
             notifier.notifyRaised(task);
         } catch (RuntimeException e) {
             log.warn("Raise notification failed for taskId={}: {}", task.id(), e.getMessage());
+        }
+    }
+
+    /**
+     * Best-effort agent invocation as an instance passes an {@code AGENT} step — a failing or
+     * unreachable agent must never break workflow progression, so the step still advances.
+     */
+    private void invokeAgent(WorkflowInstance instance, WorkflowStep step) {
+        try {
+            agentInvoker.invoke(instance, step);
+        } catch (RuntimeException e) {
+            log.warn("Agent invocation failed for instanceId={} stepKey={}: {}",
+                    instance.id(), step.key(), e.getMessage());
         }
     }
 

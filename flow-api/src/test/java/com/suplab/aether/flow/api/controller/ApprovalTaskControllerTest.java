@@ -35,6 +35,7 @@ class ApprovalTaskControllerTest {
         }
         @Override public List<ApprovalTask> findBreachedOpen(Instant asOf, int limit) { return List.of(); }
         @Override public long countOpen() { return 0; }
+        @Override public int deleteByInstance(String tenantId, UUID instanceId) { return 0; }
     }
 
     /** Engine is unused by reassign; every method throws to prove it is not called. */

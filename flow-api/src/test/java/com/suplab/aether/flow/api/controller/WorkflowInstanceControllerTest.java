@@ -64,6 +64,7 @@ class WorkflowInstanceControllerTest {
         @Override public Optional<WorkflowInstance> findByBusinessKey(FlowScope s, String businessKey) {
             return Optional.ofNullable(byId);
         }
+        @Override public int deleteByBusinessKey(FlowScope s, String businessKey) { return 0; }
     }
 
     private WorkflowInstanceController controller(FakeEngine e, FakeStore s) {

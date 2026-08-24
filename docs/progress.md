@@ -5,15 +5,53 @@
 
 ---
 
-**Active Phase:** Phase 3 — Grid Integration Deepening 🔄 (closed loop complete: idempotent deferral intake + correlation-keyed outcome callback to Grid)
+**Active Phase:** Phase 3 — Grid Integration Deepening ✅ core complete (closed loop: idempotent intake + correlation-keyed outcome callback; agent-step execution; GDPR deferral erasure)
 
 | Phase | Name | Status | Sessions |
 |---|---|---|---|
 | 0 | Scaffold | ✅ Complete | 1 |
 | 1 | Orchestration Engine Hardening | ✅ Complete | 2 |
 | 2 | Human Approval & SLA Governance | ✅ Core complete (policy + chains + reassign + notify + metrics + business hours) | 5 |
-| 3 | Grid Integration Deepening | 🔄 Closed loop complete (idempotent intake + outcome callback); agent-step exec + GDPR erasure pending | 6 |
+| 3 | Grid Integration Deepening | ✅ Core complete (idempotent intake + outcome callback + agent-step execution + GDPR deferral erasure) | 6 |
 | 4 | Kubernetes + Helm | ⏳ Planned | — |
+
+---
+
+## Phase 3 — Grid Integration Deepening ✅ (session 6 — agent-step execution + GDPR deferral erasure)
+
+**Commit:** `feat(flow): agent-step execution + right-to-erasure for Grid deferrals`
+
+Completing Phase 3 alongside the closed loop below: `AGENT` steps now invoke a (config-gated) Grid
+agent, and a deferral and its approval history can be erased on a right-to-erasure request.
+
+### What was done
+
+**Agent-step execution:**
+- `WorkflowStep.agent(key, name, nextStepKey)` factory; `AgentStepInvoker` port (domain) with a
+  `NO_OP` default. The orchestration engine invokes it as an instance passes an `AGENT` step, then
+  advances regardless — best-effort augmentation, never a park or a gate. `HttpGridAgentInvoker`
+  (engine) POSTs a bounded routing envelope (tenant, workflow/business/step keys — no PII) when
+  `aether.flow.grid.agent-url` is set; a failing call is logged and swallowed.
+
+**GDPR erasure (right to erasure, Art. 17):**
+- `DeferralErasureResult` domain record + `ApprovalErasurePort`; `DefaultApprovalErasureService`
+  (engine) erases a deferral by `correlationId` within a tenant — deletes its approval tasks first
+  (child rows), then the `grid-deferral` instance, and reports the counts. Precise (per correlation,
+  not tenant-wide) and idempotent. New store deletes: `ApprovalTaskStore.deleteByInstance` +
+  `WorkflowInstanceStore.deleteByBusinessKey` (JDBC + in-memory).
+- `DELETE /api/v1/tenants/{tenantId}/deferrals/{correlationId}` — 200 with counts, 404 when nothing
+  matched.
+
+### Constraints upheld
+- Agent invocation is best-effort — a failing agent never blocks workflow progression.
+- Erasure is tenant-scoped (no cross-tenant deletion path) and correlation-precise.
+- Flow still runs standalone: `NO_OP` agent invoker + no-callback defaults.
+
+### Verification
+- `mvn -DskipITs verify` green with the JaCoCo 80% gate; unit tests cover agent invoke-then-advance,
+  best-effort swallow, erasure (happy path, unknown correlation no-op, tenant isolation, validation),
+  and the erasure controller's 200/404. New Testcontainers ITs cover `findByBusinessKey`,
+  `deleteByBusinessKey`, and `deleteByInstance`.
 
 ---
 
