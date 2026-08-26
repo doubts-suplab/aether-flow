@@ -1,0 +1,68 @@
+global:
+  imageRegistry: "ghcr.io/suplab"
+  imagePullPolicy: Always
+  nameOverride: ""
+  namespaceOverride: "aether-flow"
+
+openshift:
+  enabled: false
+
+route:
+  host: "flow.aether.apps.cluster.example.com"
+  termination: edge
+  insecureEdgeTerminationPolicy: Redirect
+
+ingress:
+  enabled: false
+  className: "nginx"
+  annotations: {}
+  host: flow.aether.local
+  path: /
+  tls: []
+
+serviceMonitor:
+  enabled: false
+  namespace: monitoring
+  interval: 30s
+
+# ─── flow-api (Workflow Platform, port 8085) ──────────────────────────────────
+app:
+  image:
+    repository: "ghcr.io/suplab/flow-api"
+    tag: "0.1.0-SNAPSHOT"
+
+  replicaCount: 2
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+  autoscaling:
+    minReplicas: 2
+    maxReplicas: 8
+    targetCPUUtilizationPercentage: 70
+
+  serviceAccount:
+    create: true
+    annotations: {}
+
+  # ConfigMap values — non-sensitive runtime configuration.
+  config:
+    escalationEnabled: "true"
+    escalationCron: "0 */5 * * * *"
+    deferralSlaMinutes: "60"
+    # Grid seams — blank keeps Flow standalone (logging/no-op defaults).
+    gridCallbackUrl: ""
+    gridAgentUrl: ""
+    notificationWebhookUrl: ""
+    springProfilesActive: "k8s"
+
+  # Name of a pre-existing Secret (External Secrets Operator or kubectl).
+  # Expected keys: postgres-url, postgres-user, postgres-password,
+  # and optionally mail-username / mail-password when the email notifier is used.
+  secrets:
+    existingSecret: "aether-flow-secrets"

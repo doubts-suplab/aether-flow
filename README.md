@@ -17,6 +17,18 @@ cd ../.. && mvn spring-boot:run -pl flow-api
 # Health:   http://localhost:8085/actuator/health
 ```
 
+### Kubernetes (Helm)
+
+```bash
+helm install flow flow-infra/helm/aether-flow                                             # vanilla
+helm install flow flow-infra/helm/aether-flow -f flow-infra/helm/aether-flow/values-aws.yaml       # EKS (ALB + IRSA)
+helm install flow flow-infra/helm/aether-flow -f flow-infra/helm/aether-flow/values-openshift.yaml # OpenShift
+```
+
+The chart ships an HPA (min 2 / max 8 / CPU 70%), ingress/route, and a ServiceMonitor. Secrets are not
+in the chart — create the referenced `existingSecret` (`postgres-url`, `postgres-user`,
+`postgres-password`, optional `mail-username`/`mail-password`) before installing.
+
 ## Modules
 
 | Module | Purpose |
@@ -24,7 +36,7 @@ cd ../.. && mvn spring-boot:run -pl flow-api
 | `flow-domain` | Domain types: WorkflowDefinition, WorkflowStep, WorkflowInstance, ApprovalTask, DeferredDecision, FlowScope, port interfaces |
 | `flow-engine` | JDBC stores, orchestration state machine, Grid DEFER gateway, SLA escalation sweep |
 | `flow-api` | Spring Boot REST API (port 8085) + Flyway migrations + escalation scheduler |
-| `flow-infra` | Docker Compose, Kubernetes manifests, standalone Flyway migrations |
+| `flow-infra` | Docker Compose, Kubernetes manifests, Helm chart (`helm/aether-flow/`), standalone Flyway migrations |
 
 ## Key API Endpoints
 

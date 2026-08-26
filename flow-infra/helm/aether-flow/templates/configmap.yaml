@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aether-flow-config
+  namespace: {{ include "aether-flow.namespace" . }}
+  labels:
+    {{- include "aether-flow.labels" . | nindent 4 }}
+    app.kubernetes.io/component: workflow-engine
+data:
+  escalation-enabled: {{ .Values.app.config.escalationEnabled | quote }}
+  escalation-cron: {{ .Values.app.config.escalationCron | quote }}
+  deferral-sla-minutes: {{ .Values.app.config.deferralSlaMinutes | quote }}
+  grid-callback-url: {{ .Values.app.config.gridCallbackUrl | quote }}
+  grid-agent-url: {{ .Values.app.config.gridAgentUrl | quote }}
+  notification-webhook-url: {{ .Values.app.config.notificationWebhookUrl | quote }}
+  spring-profiles-active: {{ .Values.app.config.springProfilesActive | quote }}

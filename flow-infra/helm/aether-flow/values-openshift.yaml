@@ -1,0 +1,20 @@
+openshift:
+  enabled: true
+
+global:
+  imageRegistry: "quay.io/suplab"
+
+ingress:
+  enabled: false
+
+route:
+  host: "flow.aether.apps.cluster.example.com"
+  termination: edge
+  insecureEdgeTerminationPolicy: Redirect
+
+app:
+  serviceAccount:
+    annotations: {}
+
+serviceMonitor:
+  enabled: true

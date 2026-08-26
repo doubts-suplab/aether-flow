@@ -5,7 +5,7 @@
 
 ---
 
-**Active Phase:** Phase 3 — Grid Integration Deepening ✅ core complete (closed loop: idempotent intake + correlation-keyed outcome callback; agent-step execution; GDPR deferral erasure)
+**Active Phase:** Phase 4 — Kubernetes + Helm ✅ core complete (production Helm chart with HPA, ingress/route, ServiceMonitor, vanilla/AWS/OpenShift value sets, Helm lint+package release workflow)
 
 | Phase | Name | Status | Sessions |
 |---|---|---|---|
@@ -13,7 +13,26 @@
 | 1 | Orchestration Engine Hardening | ✅ Complete | 2 |
 | 2 | Human Approval & SLA Governance | ✅ Core complete (policy + chains + reassign + notify + metrics + business hours) | 5 |
 | 3 | Grid Integration Deepening | ✅ Core complete (idempotent intake + outcome callback + agent-step execution + GDPR deferral erasure) | 6 |
-| 4 | Kubernetes + Helm | ⏳ Planned | — |
+| 4 | Kubernetes + Helm | ✅ Core complete (Helm chart + HPA + AWS/OpenShift values + release workflow) | 7 |
+
+---
+
+## Phase 4 — Kubernetes + Helm ✅ (session 7 — Helm chart, HPA, multi-target values, release workflow)
+
+**Commit:** `feat(flow): Kubernetes Helm chart — HPA, AWS/OpenShift value sets, release workflow`
+
+The Dockerfile, `docker-build.yml`, and raw k8s manifests already existed; Phase 4 adds the production
+Helm chart so Flow deploys the same way as the rest of the ecosystem (vanilla K8s, AWS EKS, OpenShift).
+
+- Helm chart `flow-infra/helm/aether-flow/` (single-app, mirroring Core/Grid's hardened charts):
+  `Chart.yaml` + `values.yaml` + `values-aws.yaml` (ALB + IRSA) + `values-openshift.yaml` (Route + SCC);
+  templates for namespace, serviceaccount (token off), configmap (escalation + Grid-seam + notification
+  URLs), service (ClusterIP 8085), deployment (rolling update, topology spread, non-root uid 1000,
+  read-only rootfs, dropped caps, probes, config-checksum rollout), HPA (min 2 / max 8 / CPU 70%),
+  ingress, route, servicemonitor, NOTES. Secrets never in-chart (pre-existing `existingSecret`).
+- CI: `.github/workflows/helm-release.yml` — lint all value sets + `helm template` dry-run on changes
+  under `flow-infra/helm/**`, then package + push OCI chart to GHCR on `main`.
+- Verified: pure-YAML validated, all template includes defined; `helm lint`/`template` run in CI.
 
 ---
 
