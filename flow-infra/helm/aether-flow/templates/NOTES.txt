@@ -1,0 +1,41 @@
+Aether Flow (Workflow Platform) has been deployed successfully.
+
+Namespace : {{ include "aether-flow.namespace" . }}
+Release   : {{ .Release.Name }}
+Version   : {{ .Chart.AppVersion }}
+
+─── Pod Status ───────────────────────────────────────────────────────────────
+
+  kubectl get pods -n {{ include "aether-flow.namespace" . }}
+
+─── Access ───────────────────────────────────────────────────────────────────
+{{- if .Values.openshift.enabled }}
+
+  OpenShift Route:  https://{{ .Values.route.host }}
+
+{{- else if .Values.ingress.enabled }}
+
+  Ingress: kubectl get ingress -n {{ include "aether-flow.namespace" . }}
+  Workflow API (flow-api):  http{{ if .Values.ingress.tls }}s{{ end }}://{{ .Values.ingress.host }}
+
+{{- else }}
+
+  Ingress disabled — port-forward for local access:
+    kubectl port-forward -n {{ include "aether-flow.namespace" . }} svc/aether-flow 8085:8085
+    # then open: http://localhost:8085/actuator/health
+
+{{- end }}
+
+─── HPA ──────────────────────────────────────────────────────────────────────
+
+  kubectl get hpa -n {{ include "aether-flow.namespace" . }}
+
+─── Secrets ──────────────────────────────────────────────────────────────────
+
+  Secrets are NOT managed by this chart. Ensure the Secret
+  {{ .Values.app.secrets.existingSecret }} exists in namespace
+  {{ include "aether-flow.namespace" . }} before pods start (External Secrets
+  Operator or `kubectl create secret`).
+
+  Expected keys: postgres-url, postgres-user, postgres-password,
+  optionally mail-username / mail-password (email notifier).

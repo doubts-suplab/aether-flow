@@ -1,0 +1,22 @@
+{{- if .Values.serviceMonitor.enabled -}}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: aether-flow
+  namespace: {{ .Values.serviceMonitor.namespace }}
+  labels:
+    {{- include "aether-flow.labels" . | nindent 4 }}
+    app.kubernetes.io/component: workflow-engine
+spec:
+  namespaceSelector:
+    matchNames:
+      - {{ include "aether-flow.namespace" . }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: aether-flow
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  endpoints:
+    - port: http
+      path: /actuator/prometheus
+      interval: {{ .Values.serviceMonitor.interval }}
+{{- end }}

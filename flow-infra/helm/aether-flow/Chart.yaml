@@ -1,0 +1,15 @@
+apiVersion: v2
+name: aether-flow
+description: Aether Flow — Workflow Platform (process orchestration, human approval, SLA escalation, Grid DEFER intake)
+type: application
+version: 0.1.0
+appVersion: 0.1.0-SNAPSHOT
+keywords:
+  - aether
+  - workflow
+  - orchestration
+  - human-approval
+  - spring-boot
+maintainers:
+  - name: Suplab
+    email: beingsuplab@gmail.com

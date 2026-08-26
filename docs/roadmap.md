@@ -72,16 +72,17 @@
 
 ---
 
-## Phase 4 — Kubernetes + Helm
+## Phase 4 — Kubernetes + Helm ✅ (core complete)
 
 **Goal:** Production-ready deployment.
 
 | Deliverable | Status |
 |---|---|
-| Multi-stage Dockerfile (Temurin 21 JRE, non-root uid 1000) | ✅ (scaffolded) |
-| Helm chart `flow-infra/helm/aether-flow/` | ⏳ |
-| HPA (min 2, max 8 replicas) | ✅ (manifest) |
-| Docker build + Helm release workflows | ⏳ |
+| Multi-stage Dockerfile (Temurin 21 JRE, non-root uid 1000) | ✅ |
+| Helm chart `flow-infra/helm/aether-flow/` — namespace, serviceaccount (token off), configmap, service (8085), deployment (non-root, read-only rootfs, dropped caps, topology spread, probes, config-checksum rollout), HPA, ingress, OpenShift Route, ServiceMonitor, NOTES | ✅ |
+| HPA (min 2, max 8 replicas, CPU 70%) | ✅ |
+| Docker build + Helm release workflows (`docker-build.yml` + `helm-release.yml`: lint all value sets + template dry-run, package + push OCI to GHCR on main) | ✅ |
+| Vanilla / AWS EKS (ALB + IRSA) / OpenShift (Route + SCC) value sets | ✅ |
 
 ---
 

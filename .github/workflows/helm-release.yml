@@ -1,0 +1,63 @@
+name: Helm Lint & Package
+
+# Lints and dry-runs the aether-flow Helm chart on every change under
+# flow-infra/helm/**, then packages and pushes the chart to GHCR as an OCI
+# artifact when the change lands on main.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "flow-infra/helm/**"
+  workflow_dispatch:
+
+jobs:
+  lint:
+    name: Helm lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+      - name: Install Helm 3.16.1
+        uses: azure/setup-helm@fe7b79cd5ee1e45176fcad797de68ecaf3ca4814  # v4.2.0
+        with:
+          version: "3.16.1"
+      - name: Lint chart (default values)
+        run: helm lint flow-infra/helm/aether-flow
+      - name: Lint chart (AWS values)
+        run: helm lint flow-infra/helm/aether-flow -f flow-infra/helm/aether-flow/values-aws.yaml
+      - name: Lint chart (OpenShift values)
+        run: helm lint flow-infra/helm/aether-flow -f flow-infra/helm/aether-flow/values-openshift.yaml
+      - name: Template dry-run (fail on render error)
+        run: helm template aether-flow-preview flow-infra/helm/aether-flow --debug > /dev/null
+
+  package-and-push:
+    name: Package & push chart to GHCR
+    needs: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+      - name: Install Helm 3.16.1
+        uses: azure/setup-helm@fe7b79cd5ee1e45176fcad797de68ecaf3ca4814  # v4.2.0
+        with:
+          version: "3.16.1"
+      - name: Log in to GHCR
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772  # v3.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Package Helm chart
+        run: helm package flow-infra/helm/aether-flow --destination /tmp/helm-packages
+      - name: Push chart to GHCR (OCI)
+        run: helm push /tmp/helm-packages/aether-flow-*.tgz oci://ghcr.io/suplab/helm
