@@ -414,6 +414,48 @@ class DefaultWorkflowOrchestrationServiceTest {
     }
 
     @Test
+    void parallelForkRunsEveryBranchThenJoinsAndCompletes() {
+        var agent = new RecordingAgentInvoker();
+        var parallelEngine = new DefaultWorkflowOrchestrationService(definitions, instances, tasks,
+                new com.suplab.aether.flow.engine.notification.LoggingApprovalNotifier(),
+                ApprovalMetricsPort.NO_OP, null, com.suplab.aether.flow.ports.GridOutcomePort.NO_OP, agent);
+        definitions.save(WorkflowDefinition.create(SCOPE, "Parallel", List.of(
+                WorkflowStep.automated("intake", "Intake", "split"),
+                WorkflowStep.fork("split", "Split", List.of("enrichA", "enrichB"), "merge"),
+                WorkflowStep.agent("enrichA", "Enrich A", "merge"),
+                WorkflowStep.agent("enrichB", "Enrich B", "merge"),
+                WorkflowStep.join("merge", "Merge", "finish"),
+                WorkflowStep.end("finish", "Done"))));
+
+        var completed = parallelEngine.start(SCOPE, "INV-PAR");
+
+        // Both parallel branches ran (each agent step invoked once) and the instance converged + finished.
+        assertThat(agent.invokedSteps).containsExactlyInAnyOrder("enrichA", "enrichB");
+        assertThat(completed.status()).isEqualTo(WorkflowStatus.COMPLETED);
+        assertThat(tasks.all()).isEmpty();
+    }
+
+    @Test
+    void parallelForkWithMultiStepBranchesRunsEachBranchToTheJoin() {
+        var agent = new RecordingAgentInvoker();
+        var parallelEngine = new DefaultWorkflowOrchestrationService(definitions, instances, tasks,
+                new com.suplab.aether.flow.engine.notification.LoggingApprovalNotifier(),
+                ApprovalMetricsPort.NO_OP, null, com.suplab.aether.flow.ports.GridOutcomePort.NO_OP, agent);
+        definitions.save(WorkflowDefinition.create(SCOPE, "Parallel Multi", List.of(
+                WorkflowStep.fork("split", "Split", List.of("a1", "b1"), "merge"),
+                WorkflowStep.automated("a1", "A step 1", "a2"),
+                WorkflowStep.agent("a2", "A step 2", "merge"),
+                WorkflowStep.agent("b1", "B step 1", "merge"),
+                WorkflowStep.join("merge", "Merge", "finish"),
+                WorkflowStep.end("finish", "Done"))));
+
+        var completed = parallelEngine.start(SCOPE, "INV-PAR2");
+
+        assertThat(agent.invokedSteps).containsExactlyInAnyOrder("a2", "b1");
+        assertThat(completed.status()).isEqualTo(WorkflowStatus.COMPLETED);
+    }
+
+    @Test
     void persistsEveryTransition() {
         definitions.save(approvalWorkflow());
         engine.start(SCOPE, "INV-1001");

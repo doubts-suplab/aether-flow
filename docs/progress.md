@@ -5,15 +5,51 @@
 
 ---
 
-**Active Phase:** Phase 4 — Kubernetes + Helm ✅ core complete (production Helm chart with HPA, ingress/route, ServiceMonitor, vanilla/AWS/OpenShift value sets, Helm lint+package release workflow)
+**Active Phase:** Phase 1 revisited — parallel AND fork/join gateways delivered (the last deferred Phase 1 item); Phases 2–4 core complete
 
 | Phase | Name | Status | Sessions |
 |---|---|---|---|
 | 0 | Scaffold | ✅ Complete | 1 |
-| 1 | Orchestration Engine Hardening | ✅ Complete | 2 |
+| 1 | Orchestration Engine Hardening | ✅ Complete (incl. parallel AND fork/join) | 2, 8 |
 | 2 | Human Approval & SLA Governance | ✅ Core complete (policy + chains + reassign + notify + metrics + business hours) | 5 |
 | 3 | Grid Integration Deepening | ✅ Core complete (idempotent intake + outcome callback + agent-step execution + GDPR deferral erasure) | 6 |
 | 4 | Kubernetes + Helm | ✅ Core complete (Helm chart + HPA + AWS/OpenShift values + release workflow) | 7 |
+
+---
+
+## Phase 1 — Parallel AND fork/join gateways ✅ (session 8)
+
+**Commit:** `feat(flow): parallel AND fork/join gateways`
+
+Closes the last deferred Phase 1 item — the engine graduates from single-path (linear + exclusive
+rework branches) to a genuine **parallel AND-split/join**.
+
+### What was done
+- **Domain:** two new `StepType`s — `FORK` (an AND-split) and `JOIN` (an AND-join) — and a new
+  `WorkflowStep.branchKeys` component naming a fork's parallel branch heads (empty for every other
+  type). Factories `WorkflowStep.fork(key, name, branchKeys, joinKey)` and
+  `WorkflowStep.join(key, name, nextStepKey)`; `StepType.isFork()`/`isJoin()` predicates.
+- **Validation:** `WorkflowDefinition` now validates each fork/join pair — a FORK (≥2 branches) must
+  converge on a JOIN, and every branch, followed transitively, must reach exactly that join without
+  looping. Branches carry AUTOMATED/AGENT steps only — a human-approval gate, a nested FORK, or the
+  END step inside a branch is rejected, keeping the single-token park model intact.
+- **Engine:** `DefaultWorkflowOrchestrationService.drive` runs a FORK by executing every branch
+  synchronously to the join (invoking the agent on AGENT steps, best-effort), then advancing past the
+  JOIN to the single continuation. The instance stays on the fork until the whole block resolves — no
+  concurrent parking.
+- **API:** `StepRequest`/step view gain `branchKeys` so a fork/join graph can be created and read over
+  REST. Steps still persist as JSONB (Jackson) — no migration, backward compatible (absent
+  `branchKeys` deserialises to empty).
+
+### Follow-up (documented, not regressed)
+- A human-approval gate *inside* a parallel branch needs a multi-token instance model (concurrent
+  WAITING_APPROVAL parks) and remains a Phase 1 follow-up; the synchronous AND fork/join above is the
+  delivered increment.
+
+### Constraints upheld
+- Definitions still validate on construction — a malformed fork/join never persists.
+- No new cross-tenant path; the engine remains framework-free (ports only); AGENT invocation in a
+  branch is best-effort and never blocks progression.
 
 ---
 

@@ -229,6 +229,12 @@ public class DefaultWorkflowOrchestrationService implements WorkflowEnginePort {
             if (step.type() == StepType.AGENT) {
                 invokeAgent(current, step);
             }
+            if (step.type().isFork()) {
+                // AND-split: run every parallel branch to the fork's join, then advance to that join
+                // (which falls through to the single continuation). Branches are synchronous, so the
+                // instance stays on the fork until the whole block resolves — no concurrent parking.
+                runParallelBranches(current, definition, step);
+            }
             var next = requireStep(definition, step.nextStepKey());
             current = current.moveTo(next);
             instanceStore.save(current);
@@ -293,6 +299,33 @@ public class DefaultWorkflowOrchestrationService implements WorkflowEnginePort {
             log.warn("Agent invocation failed for instanceId={} stepKey={}: {}",
                     instance.id(), step.key(), e.getMessage());
         }
+    }
+
+    /**
+     * Runs every parallel branch of a FORK synchronously up to the fork's join. Each branch is walked
+     * step-by-step from its head, invoking the agent on any {@code AGENT} step (best-effort), until it
+     * reaches the join key. The definition is validated so branches carry only AUTOMATED/AGENT steps
+     * and always converge on the fork's join — so this terminates and never needs to park. Branch
+     * traversal drives side-effects only; the instance's persisted position stays on the fork until
+     * the caller advances it past the join.
+     */
+    private void runParallelBranches(WorkflowInstance instance, WorkflowDefinition definition,
+                                     WorkflowStep fork) {
+        var joinKey = fork.nextStepKey();
+        for (String branchKey : fork.branchKeys()) {
+            var cursor = requireStep(definition, branchKey);
+            int guard = 0;
+            while (!cursor.key().equals(joinKey)) {
+                if (++guard > MAX_TRANSITIONS)
+                    throw new IllegalStateException("parallel branch " + branchKey + " did not converge");
+                if (cursor.type() == StepType.AGENT) {
+                    invokeAgent(instance, cursor);
+                }
+                cursor = requireStep(definition, cursor.nextStepKey());
+            }
+        }
+        log.info("Ran {} parallel branches of fork={} for instanceId={} — converged on join={}",
+                fork.branchKeys().size(), fork.key(), instance.id(), joinKey);
     }
 
     /**

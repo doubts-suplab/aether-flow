@@ -28,7 +28,7 @@
 
 ---
 
-## Phase 1 — Orchestration Engine Hardening ✅ (core complete; parallel AND fork/join deferred)
+## Phase 1 — Orchestration Engine Hardening ✅ (core complete)
 
 **Goal:** The state machine is fully operational end-to-end under integration tests.
 
@@ -37,7 +37,7 @@
 | Instance cancellation endpoint + operator actions (withdraws open approval task; `GET …/instances/stats`) | ✅ |
 | Testcontainers coverage green in CI (definition, instance, approval stores, escalation) — `maven-failsafe-plugin` wired; `*IT` run at `verify` | ✅ |
 | Branching gateways (beyond linear step graphs) — exclusive branching via approval-outcome routing (reject → rework branch, with loops) | ✅ |
-| Parallel (AND) fork/join + data-condition gateways — deferred: needs a multi-token instance model (tracked for a later phase) | ⏳ |
+| Parallel (AND) fork/join gateways — `StepType.FORK`/`JOIN` + `WorkflowStep.branchKeys`; a fork fans out to ≥2 branches that the engine runs and re-converges on the fork's join (`WorkflowStep.fork(...)`/`join(...)`, `WorkflowDefinition` validates a balanced, terminating fork/join). Branches are **synchronous** (AUTOMATED/AGENT steps) so the single-token park model holds — a human gate inside a parallel branch stays a follow-up (needs the concurrent-park model) | ✅ |
 | Definition versioning — publish new versions; version-pinned execution keeps in-flight instances on their own version | ✅ |
 
 ---
@@ -93,7 +93,7 @@
 
 | Item | Feasibility |
 |---|---|
-| Richer step types + non-linear patterns (parallel AND fork/join) *(explicitly deferred — needs a multi-token instance model)* | M–L |
+| Human-approval gates *inside* a parallel branch (concurrent parking) + data-condition gateways *(Phase 1 follow-up — the synchronous AND fork/join is delivered; concurrent human parking needs a multi-token instance model)* | M–L |
 | Visual/designer UI or BPMN import (if intended) | L |
 | More sophisticated escalation chains + notifications *(addressed in Phase 2; escalation chains, webhook + email sinks, and business-hours calendars all delivered)* | M |
 | Operator visibility + metrics *(approval-lifecycle counters + escalation/open metrics delivered in Phase 2; richer dashboards remain)* | M |

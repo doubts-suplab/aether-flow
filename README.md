@@ -67,7 +67,7 @@ A **workflow** (`tenantId` + `workflowKey`) is a versioned process template — 
 | Concept | Description |
 |---|---|
 | `WorkflowDefinition` | Versioned step graph, validated on construction (exactly one END, unique keys, resolvable transitions) |
-| `WorkflowStep` | `AUTOMATED` · `AGENT` · `HUMAN_APPROVAL` (SLA + role, optional `reworkStepKey` reject branch) · `END` |
+| `WorkflowStep` | `AUTOMATED` · `AGENT` · `HUMAN_APPROVAL` (SLA + role, optional `reworkStepKey` reject branch) · `FORK`/`JOIN` (parallel AND-split/join, `branchKeys`) · `END` |
 | `WorkflowInstance` | Lifecycle: `RUNNING → WAITING_APPROVAL → COMPLETED / REJECTED / CANCELLED / FAILED` |
 | `ApprovalTask` | A human review gate with an SLA deadline: `PENDING → APPROVED / REJECTED / ESCALATED / WITHDRAWN` |
 | `DeferredDecision` | Grid's bounded inbound DEFER projection (correlation id, tenant, agent, summary, confidence) |
@@ -76,6 +76,8 @@ A **workflow** (`tenantId` + `workflowKey`) is a versioned process template — 
 ### Orchestration
 
 Starting an instance drives it through automated and agent steps until it either **parks** at a `HUMAN_APPROVAL` gate (raising an `ApprovalTask`) or **completes** at the `END` step. A human decision resumes a parked instance: an approval advances it to the next step (and onward until the next park or completion); a rejection either **branches to a rework step** (when the approval step declares a `reworkStepKey` — e.g. `review → fix → review`, a genuine non-linear loop) or, with no rework branch, stops the instance in `REJECTED`. An operator can also **cancel** a non-terminal instance at any point — that withdraws its open approval task (a terminal, non-decision `WITHDRAWN` outcome) so it leaves the review queue. Every transition is persisted, so state survives a restart.
+
+Beyond the linear/rework paths, a definition can declare a **parallel AND fork/join**: a `FORK` step fans out to two or more branches (`branchKeys`) that the engine runs and then re-converges on the fork's matching `JOIN` before continuing. The definition validates that the block is balanced and terminating. Parallel branches are **synchronous** — they carry `AUTOMATED`/`AGENT` steps only, never a human gate — so the instance keeps a single position and the one-park-at-a-time approval model is preserved (a human gate *inside* a parallel branch remains a follow-up).
 
 Definitions are **versioned**: registering a definition for an existing `workflowKey` publishes a new version and retires the old one, while running instances stay pinned to — and execute against — the exact version they started on.
 

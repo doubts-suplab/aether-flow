@@ -46,9 +46,10 @@ WorkflowDefinition
   ├── nextStep(step)       → graph successor (empty for END)
   └── deactivate()         → active=false (running instances unaffected)
 
-WorkflowStep     = (key, name, type, slaMinutes, assignedRole, nextStepKey, reworkStepKey)
+WorkflowStep     = (key, name, type, slaMinutes, assignedRole, nextStepKey, reworkStepKey, branchKeys)
                    reworkStepKey: HUMAN_APPROVAL reject branch (rework loop); null ⇒ reject terminates
-StepType         = AUTOMATED | AGENT | HUMAN_APPROVAL | END
+                   branchKeys:    FORK parallel branch heads (≥2); nextStepKey = the matching JOIN
+StepType         = AUTOMATED | AGENT | HUMAN_APPROVAL | FORK | JOIN | END
 FlowScope        = (tenantId, workflowKey)   — the ownership + isolation key
 
 WorkflowInstance
@@ -123,6 +124,8 @@ Flow owns **no** vector store or embedding — the step graph is plain JSONB, ev
 4. `POST …/approvals/{taskId}/reassign` → delegates an open task to another role (`ApprovalTask.reassign`); the task stays open in the new role's queue, its outcome, deadline, and escalation level unchanged. Raising a task fires `ApprovalNotificationPort.notifyRaised`.
 
 > **Operator metrics.** Each lifecycle transition also increments a Micrometer counter through `ApprovalMetricsPort` — `aether.flow.approvals.raised` (on park / deferral intake), `.approved`, `.rejected` (on decision), and `.reassigned` (on delegation). With the sweep's `aether.flow.escalation.escalated` counter and `aether.flow.approvals.open` gauge, these give an operator the full picture of review-queue throughput and depth. The port is framework-free; only the API-module adapter touches Micrometer.
+
+> **Parallel AND fork/join.** A `FORK` step names ≥2 branch heads (`branchKeys`) and its matching `JOIN` (`nextStepKey`). `WorkflowDefinition` validates the block is balanced and terminating — each branch, followed transitively, reaches exactly that join, and branches contain no human gate, nested fork, or END. When `drive` reaches a FORK it runs every branch **synchronously** to the join (invoking the agent on AGENT steps, best-effort), then advances past the JOIN to the single continuation. Because branches never park, the instance keeps one `currentStepKey` and the AND-join is deterministic; a human gate inside a branch (which would need concurrent parks) stays a follow-up.
 
 ### 5.3 Cancellation (operator withdrawal)
 1. `POST …/instances/{id}/cancel` → `WorkflowEnginePort.cancel` loads the instance; a terminal instance is rejected (409).

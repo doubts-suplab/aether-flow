@@ -64,6 +64,59 @@ public record WorkflowDefinition(
             if (step.reworkStepKey() != null && keys.stream().noneMatch(k -> k.equals(step.reworkStepKey())))
                 throw new IllegalArgumentException(
                         "step " + step.key() + " rework routes to unknown step " + step.reworkStepKey());
+            for (String branchKey : step.branchKeys()) {
+                if (keys.stream().noneMatch(k -> k.equals(branchKey)))
+                    throw new IllegalArgumentException(
+                            "FORK " + step.key() + " branches to unknown step " + branchKey);
+            }
+        }
+        validateForkJoin(steps);
+    }
+
+    /**
+     * Validates every FORK/JOIN pair: a FORK must point at a JOIN, and each of its branches must run
+     * — synchronously — to exactly that JOIN. Parallel branches carry AUTOMATED/AGENT steps only:
+     * a human gate, nested fork, or the END step inside a branch is rejected so the single-token
+     * instance model (one WAITING_APPROVAL park at a time) is never broken by a parallel block.
+     */
+    private static void validateForkJoin(List<WorkflowStep> steps) {
+        java.util.function.Function<String, WorkflowStep> byKey = key -> steps.stream()
+                .filter(s -> s.key().equals(key)).findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("unknown step " + key));
+        for (WorkflowStep fork : steps) {
+            if (!fork.type().isFork()) continue;
+            var join = byKey.apply(fork.nextStepKey());
+            if (!join.type().isJoin())
+                throw new IllegalArgumentException(
+                        "FORK " + fork.key() + " must converge on a JOIN, not " + join.key());
+            for (String branchKey : fork.branchKeys()) {
+                walkBranchToJoin(fork, branchKey, join.key(), byKey);
+            }
+        }
+    }
+
+    private static void walkBranchToJoin(WorkflowStep fork, String branchKey, String joinKey,
+                                         java.util.function.Function<String, WorkflowStep> byKey) {
+        var visited = new java.util.HashSet<String>();
+        var cursor = byKey.apply(branchKey);
+        while (true) {
+            if (cursor.key().equals(joinKey)) return; // branch converged on the fork's join
+            if (!visited.add(cursor.key()))
+                throw new IllegalArgumentException(
+                        "FORK " + fork.key() + " branch " + branchKey + " loops without reaching its join");
+            if (cursor.type().requiresHuman())
+                throw new IllegalArgumentException(
+                        "FORK " + fork.key() + " branch may not contain a human-approval step (" + cursor.key() + ")");
+            if (cursor.type().isFork())
+                throw new IllegalArgumentException(
+                        "FORK " + fork.key() + " branch may not contain a nested FORK (" + cursor.key() + ")");
+            if (cursor.type().isJoin())
+                throw new IllegalArgumentException(
+                        "FORK " + fork.key() + " branch reaches the wrong JOIN (" + cursor.key() + ")");
+            if (cursor.type().isTerminal())
+                throw new IllegalArgumentException(
+                        "FORK " + fork.key() + " branch reaches END before its join (" + cursor.key() + ")");
+            cursor = byKey.apply(cursor.nextStepKey());
         }
     }
 

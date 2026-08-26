@@ -44,9 +44,13 @@ public class WorkflowDefinitionController {
     /** Request body for registering a workflow definition. */
     public record CreateWorkflowRequest(String workflowKey, String name, List<StepRequest> steps) {}
 
-    /** One step in a create request. {@code reworkStepKey} is optional (HUMAN_APPROVAL reject branch). */
+    /**
+     * One step in a create request. {@code reworkStepKey} is optional (HUMAN_APPROVAL reject branch);
+     * {@code branchKeys} is optional and only meaningful for a FORK step (its parallel branch heads).
+     */
     public record StepRequest(String key, String name, String type, int slaMinutes,
-                              String assignedRole, String nextStepKey, String reworkStepKey) {}
+                              String assignedRole, String nextStepKey, String reworkStepKey,
+                              List<String> branchKeys) {}
 
     /**
      * Registers a workflow definition. The first registration for a {@code workflowKey} is version 1;
@@ -132,7 +136,7 @@ public class WorkflowDefinitionController {
             throw new IllegalArgumentException("unknown step type: " + s.type());
         }
         return new WorkflowStep(s.key(), s.name(), type, s.slaMinutes(), s.assignedRole(), s.nextStepKey(),
-                s.reworkStepKey());
+                s.reworkStepKey(), s.branchKeys() == null ? List.of() : s.branchKeys());
     }
 
     private static Map<String, Object> toView(WorkflowDefinition definition) {
@@ -143,7 +147,8 @@ public class WorkflowDefinitionController {
                 "slaMinutes", s.slaMinutes(),
                 "assignedRole", s.assignedRole() != null ? s.assignedRole() : "",
                 "nextStepKey", s.nextStepKey() != null ? s.nextStepKey() : "",
-                "reworkStepKey", s.reworkStepKey() != null ? s.reworkStepKey() : "")).toList();
+                "reworkStepKey", s.reworkStepKey() != null ? s.reworkStepKey() : "",
+                "branchKeys", s.branchKeys())).toList();
         return Map.of(
                 "id", definition.id().toString(),
                 "workflowKey", definition.workflowKey(),
