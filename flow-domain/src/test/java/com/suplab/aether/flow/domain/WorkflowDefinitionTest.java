@@ -110,4 +110,54 @@ class WorkflowDefinitionTest {
         assertThatThrownBy(() -> WorkflowDefinition.create(FlowScope.of("t", "wf"), "n", bad))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("unknown step");
     }
+
+    // ── Parallel AND fork/join ────────────────────────────────────────────────
+
+    @Test
+    void acceptsABalancedForkJoin() {
+        var def = WorkflowDefinition.create(FlowScope.of("acme", "parallel"), "Parallel", List.of(
+                WorkflowStep.fork("split", "Split", List.of("branchA", "branchB"), "merge"),
+                WorkflowStep.automated("branchA", "Branch A", "merge"),
+                WorkflowStep.agent("branchB", "Branch B", "merge"),
+                WorkflowStep.join("merge", "Merge", "finish"),
+                WorkflowStep.end("finish", "Done")));
+        assertThat(def.steps()).hasSize(5);
+        assertThat(def.stepByKey("split").orElseThrow().branchKeys()).containsExactly("branchA", "branchB");
+    }
+
+    @Test
+    void rejectsForkThatDoesNotConvergeOnAJoin() {
+        var bad = List.of(
+                WorkflowStep.fork("split", "Split", List.of("a", "b"), "notAJoin"),
+                WorkflowStep.automated("a", "A", "notAJoin"),
+                WorkflowStep.automated("b", "B", "notAJoin"),
+                WorkflowStep.automated("notAJoin", "Not a join", "end"),
+                WorkflowStep.end("end", "End"));
+        assertThatThrownBy(() -> WorkflowDefinition.create(FlowScope.of("t", "wf"), "n", bad))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("must converge on a JOIN");
+    }
+
+    @Test
+    void rejectsHumanApprovalInsideAParallelBranch() {
+        var bad = List.of(
+                WorkflowStep.fork("split", "Split", List.of("a", "b"), "merge"),
+                WorkflowStep.humanApproval("a", "Gate in branch", 60, "reviewer", "merge"),
+                WorkflowStep.automated("b", "B", "merge"),
+                WorkflowStep.join("merge", "Merge", "end"),
+                WorkflowStep.end("end", "End"));
+        assertThatThrownBy(() -> WorkflowDefinition.create(FlowScope.of("t", "wf"), "n", bad))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("may not contain a human-approval step");
+    }
+
+    @Test
+    void rejectsForkBranchToUnknownStep() {
+        var bad = List.of(
+                WorkflowStep.fork("split", "Split", List.of("a", "ghost"), "merge"),
+                WorkflowStep.automated("a", "A", "merge"),
+                WorkflowStep.join("merge", "Merge", "end"),
+                WorkflowStep.end("end", "End"));
+        assertThatThrownBy(() -> WorkflowDefinition.create(FlowScope.of("t", "wf"), "n", bad))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("unknown step");
+    }
 }

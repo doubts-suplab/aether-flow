@@ -1,5 +1,7 @@
 package com.suplab.aether.flow.domain;
 
+import java.util.List;
+
 /**
  * A single node in a {@link WorkflowDefinition}'s process graph.
  *
@@ -13,15 +15,25 @@ package com.suplab.aether.flow.domain;
  * {@code REJECTED} — so the graph is no longer strictly linear. A reject with no {@code reworkStepKey}
  * still terminates the instance.</p>
  *
+ * <p>A {@link StepType#FORK} step splits execution into parallel branches: {@code branchKeys} names
+ * the first step of each branch, and {@code nextStepKey} names the matching {@link StepType#JOIN}
+ * where they converge. The engine runs every branch and advances past the JOIN only once all
+ * branches have arrived (an AND-join). Parallel branches are synchronous — they contain
+ * AUTOMATED / AGENT steps and must not park for a human — so the single-token instance model is
+ * preserved; a JOIN's {@code nextStepKey} is the single continuation after the parallel block.</p>
+ *
  * @param key           unique-within-definition identifier for this step
  * @param name          human-readable label
  * @param type          the kind of work this step represents
  * @param slaMinutes    approval SLA budget in minutes (only meaningful for HUMAN_APPROVAL; 0 otherwise)
  * @param assignedRole  role expected to action a raised approval task (defaulted for HUMAN_APPROVAL,
  *                      {@code null} for other step types)
- * @param nextStepKey   the step this transitions to on completion / approval, or {@code null} for END
+ * @param nextStepKey   the step this transitions to on completion / approval (the JOIN, for a FORK),
+ *                      or {@code null} for END
  * @param reworkStepKey the step a rejected approval routes to (a rework branch); {@code null} means a
  *                      reject terminates the instance. Only meaningful for HUMAN_APPROVAL.
+ * @param branchKeys    for a FORK, the first step of each parallel branch (>= 2 keys); empty for every
+ *                      other step type
  */
 public record WorkflowStep(
         String key,
@@ -30,7 +42,8 @@ public record WorkflowStep(
         int slaMinutes,
         String assignedRole,
         String nextStepKey,
-        String reworkStepKey
+        String reworkStepKey,
+        List<String> branchKeys
 ) {
     public WorkflowStep {
         if (key == null || key.isBlank()) throw new IllegalArgumentException("step key required");
@@ -44,6 +57,15 @@ public record WorkflowStep(
             reworkStepKey = null; // rework routing is an approval-gate concept only
         }
         if (reworkStepKey != null && reworkStepKey.isBlank()) reworkStepKey = null;
+        branchKeys = branchKeys == null ? List.of() : List.copyOf(branchKeys);
+        if (type == StepType.FORK) {
+            if (branchKeys.size() < 2)
+                throw new IllegalArgumentException("FORK step " + key + " requires at least two branches");
+            if (branchKeys.stream().anyMatch(k -> k == null || k.isBlank()))
+                throw new IllegalArgumentException("FORK step " + key + " has a blank branch key");
+        } else if (!branchKeys.isEmpty()) {
+            throw new IllegalArgumentException("branchKeys are only valid on a FORK step (" + key + ")");
+        }
         if (type.isTerminal() && nextStepKey != null)
             throw new IllegalArgumentException("END step must not declare a nextStepKey");
         if (!type.isTerminal() && (nextStepKey == null || nextStepKey.isBlank()))
@@ -56,7 +78,8 @@ public record WorkflowStep(
      */
     public static WorkflowStep humanApproval(String key, String name, int slaMinutes,
                                              String assignedRole, String nextStepKey) {
-        return new WorkflowStep(key, name, StepType.HUMAN_APPROVAL, slaMinutes, assignedRole, nextStepKey, null);
+        return new WorkflowStep(key, name, StepType.HUMAN_APPROVAL, slaMinutes, assignedRole, nextStepKey,
+                null, List.of());
     }
 
     /**
@@ -67,14 +90,14 @@ public record WorkflowStep(
                                                        String assignedRole, String nextStepKey,
                                                        String reworkStepKey) {
         return new WorkflowStep(key, name, StepType.HUMAN_APPROVAL, slaMinutes, assignedRole, nextStepKey,
-                reworkStepKey);
+                reworkStepKey, List.of());
     }
 
     /**
      * Factory for an automated system step.
      */
     public static WorkflowStep automated(String key, String name, String nextStepKey) {
-        return new WorkflowStep(key, name, StepType.AUTOMATED, 0, null, nextStepKey, null);
+        return new WorkflowStep(key, name, StepType.AUTOMATED, 0, null, nextStepKey, null, List.of());
     }
 
     /**
@@ -83,13 +106,29 @@ public record WorkflowStep(
      * never parks the instance for a human.
      */
     public static WorkflowStep agent(String key, String name, String nextStepKey) {
-        return new WorkflowStep(key, name, StepType.AGENT, 0, null, nextStepKey, null);
+        return new WorkflowStep(key, name, StepType.AGENT, 0, null, nextStepKey, null, List.of());
+    }
+
+    /**
+     * Factory for a parallel AND-fork. {@code branchKeys} are the first steps of each parallel branch
+     * (>= 2); {@code joinKey} is the matching {@link StepType#JOIN} where the branches converge.
+     */
+    public static WorkflowStep fork(String key, String name, List<String> branchKeys, String joinKey) {
+        return new WorkflowStep(key, name, StepType.FORK, 0, null, joinKey, null, branchKeys);
+    }
+
+    /**
+     * Factory for a parallel AND-join. {@code nextStepKey} is the single continuation after the
+     * parallel block converges.
+     */
+    public static WorkflowStep join(String key, String name, String nextStepKey) {
+        return new WorkflowStep(key, name, StepType.JOIN, 0, null, nextStepKey, null, List.of());
     }
 
     /**
      * Factory for the terminal step.
      */
     public static WorkflowStep end(String key, String name) {
-        return new WorkflowStep(key, name, StepType.END, 0, null, null, null);
+        return new WorkflowStep(key, name, StepType.END, 0, null, null, null, List.of());
     }
 }

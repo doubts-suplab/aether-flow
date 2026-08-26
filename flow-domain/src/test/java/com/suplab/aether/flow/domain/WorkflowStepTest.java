@@ -46,7 +46,8 @@ class WorkflowStepTest {
     @Test
     void nonApprovalStepsDropAnyReworkBranch() {
         // rework routing is an approval-gate concept only — nulled for other types
-        assertThat(new WorkflowStep("a", "A", StepType.AUTOMATED, 0, null, "b", "x").reworkStepKey()).isNull();
+        assertThat(new WorkflowStep("a", "A", StepType.AUTOMATED, 0, null, "b", "x", java.util.List.of())
+                .reworkStepKey()).isNull();
     }
 
     @Test
@@ -59,31 +60,59 @@ class WorkflowStepTest {
         assertThat(StepType.HUMAN_APPROVAL.requiresHuman()).isTrue();
         assertThat(StepType.AUTOMATED.requiresHuman()).isFalse();
         assertThat(StepType.AGENT.requiresHuman()).isFalse();
+        assertThat(StepType.FORK.isFork()).isTrue();
+        assertThat(StepType.JOIN.isJoin()).isTrue();
         assertThat(StepType.END.isTerminal()).isTrue();
         assertThat(StepType.AUTOMATED.isTerminal()).isFalse();
     }
 
     @Test
     void rejectsBlankKeyAndNullTypeAndNegativeSla() {
-        assertThatThrownBy(() -> new WorkflowStep(" ", "n", StepType.END, 0, null, null, null))
+        assertThatThrownBy(() -> new WorkflowStep(" ", "n", StepType.END, 0, null, null, null, java.util.List.of()))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("step key");
-        assertThatThrownBy(() -> new WorkflowStep("k", "n", null, 0, null, null, null))
+        assertThatThrownBy(() -> new WorkflowStep("k", "n", null, 0, null, null, null, java.util.List.of()))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("type");
-        assertThatThrownBy(() -> new WorkflowStep("k", "n", StepType.AUTOMATED, -1, null, "x", null))
+        assertThatThrownBy(() -> new WorkflowStep("k", "n", StepType.AUTOMATED, -1, null, "x", null, java.util.List.of()))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("slaMinutes");
     }
 
     @Test
     void endStepMustNotDeclareNext() {
-        assertThatThrownBy(() -> new WorkflowStep("e", "E", StepType.END, 0, null, "next", null))
+        assertThatThrownBy(() -> new WorkflowStep("e", "E", StepType.END, 0, null, "next", null, java.util.List.of()))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("must not declare");
     }
 
     @Test
     void nonTerminalStepRequiresNext() {
-        assertThatThrownBy(() -> new WorkflowStep("a", "A", StepType.AUTOMATED, 0, null, null, null))
+        assertThatThrownBy(() -> new WorkflowStep("a", "A", StepType.AUTOMATED, 0, null, null, null, java.util.List.of()))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("requires a nextStepKey");
-        assertThatThrownBy(() -> new WorkflowStep("a", "A", StepType.AUTOMATED, 0, null, " ", null))
+        assertThatThrownBy(() -> new WorkflowStep("a", "A", StepType.AUTOMATED, 0, null, " ", null, java.util.List.of()))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("requires a nextStepKey");
+    }
+
+    @Test
+    void forkRequiresAtLeastTwoBranchesAndConvergesOnItsJoin() {
+        var fork = WorkflowStep.fork("split", "Split", java.util.List.of("a", "b"), "merge");
+        assertThat(fork.type()).isEqualTo(StepType.FORK);
+        assertThat(fork.branchKeys()).containsExactly("a", "b");
+        assertThat(fork.nextStepKey()).isEqualTo("merge");
+
+        assertThatThrownBy(() -> WorkflowStep.fork("split", "Split", java.util.List.of("only"), "merge"))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("at least two branches");
+    }
+
+    @Test
+    void branchKeysRejectedOnNonForkSteps() {
+        assertThatThrownBy(() -> new WorkflowStep("a", "A", StepType.AUTOMATED, 0, null, "b", null,
+                java.util.List.of("x", "y")))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("only valid on a FORK");
+    }
+
+    @Test
+    void joinIsAPassThroughWithASingleSuccessor() {
+        var join = WorkflowStep.join("merge", "Merge", "finish");
+        assertThat(join.type()).isEqualTo(StepType.JOIN);
+        assertThat(join.branchKeys()).isEmpty();
+        assertThat(join.nextStepKey()).isEqualTo("finish");
     }
 }
